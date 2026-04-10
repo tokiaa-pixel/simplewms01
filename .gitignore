@@ -1,0 +1,26 @@
+# 依存関係
+node_modules/
+
+# Next.js ビルド成果物
+.next/
+out/
+
+# 型定義（Next.js が自動生成）
+next-env.d.ts
+
+# キャッシュ
+*.tsbuildinfo
+
+# 環境変数
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/

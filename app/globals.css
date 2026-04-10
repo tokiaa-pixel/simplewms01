@@ -1,0 +1,134 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── フォント ────────────────────────────────────────────── */
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans',
+    'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+
+  /* ブランドカラー CSS変数 */
+  --brand-navy:    #002B5C;
+  --brand-blue:    #005B99;
+  --brand-teal:    #00A0C8;
+  --brand-light:   #E6F3F9;
+  --brand-light-2: #F0F7FB;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: #1e293b;
+  background-color: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── スクロールバー ───────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #94a3b8; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── テーブル共通 ────────────────────────────────────────── */
+@layer components {
+
+  /* テーブルラッパー */
+  .wms-table-wrap {
+    @apply overflow-x-auto;
+  }
+
+  /* テーブル本体 */
+  .wms-table {
+    @apply w-full text-sm border-collapse;
+  }
+
+  /* thead */
+  .wms-table thead tr {
+    @apply bg-slate-50 border-b-2 border-slate-200;
+  }
+  .wms-table thead th {
+    @apply px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap
+           tracking-wide uppercase;
+  }
+
+  /* tbody */
+  .wms-table tbody tr {
+    @apply border-b border-slate-100 transition-colors;
+  }
+  .wms-table tbody tr:last-child { @apply border-b-0; }
+  .wms-table tbody tr:hover      { @apply bg-brand-light-2; }
+  .wms-table tbody td {
+    @apply px-4 py-3 text-sm text-slate-700 whitespace-nowrap;
+  }
+
+  /* カードラッパー */
+  .wms-card {
+    @apply bg-white rounded-lg border border-slate-200 shadow-card overflow-hidden;
+  }
+
+  /* カードヘッダー */
+  .wms-card-header {
+    @apply px-5 py-3.5 border-b border-slate-200 flex items-center gap-3
+           bg-white;
+  }
+  .wms-card-header h2,
+  .wms-card-header h3 {
+    @apply text-sm font-semibold text-slate-800;
+  }
+
+  /* セクションタイトル */
+  .wms-section-title {
+    @apply text-[10px] font-bold text-slate-400 uppercase tracking-widest;
+  }
+
+  /* ─ ボタン ─ */
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 rounded
+           bg-brand-navy text-white text-sm font-medium
+           hover:bg-brand-navy-mid active:bg-brand-navy
+           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 rounded
+           bg-white text-slate-700 text-sm font-medium
+           border border-slate-300 hover:bg-slate-50
+           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 rounded
+           bg-red-600 text-white text-sm font-medium
+           hover:bg-red-700 transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded
+           text-slate-500 text-sm hover:bg-slate-100
+           transition-colors;
+  }
+
+  /* ─ フォームインプット ─ */
+  .wms-input {
+    @apply w-full border border-slate-300 rounded px-3 py-2 text-sm
+           text-slate-800 placeholder-slate-400 bg-white
+           focus:outline-none focus:ring-2 focus:ring-brand-teal
+           focus:border-transparent transition;
+  }
+  .wms-select {
+    @apply w-full border border-slate-300 rounded px-3 py-2 text-sm
+           text-slate-800 bg-white
+           focus:outline-none focus:ring-2 focus:ring-brand-teal
+           focus:border-transparent transition;
+  }
+  .wms-label {
+    @apply block text-xs font-medium text-slate-600 mb-1.5;
+  }
+  .wms-error {
+    @apply text-xs text-red-500 mt-1;
+  }
+
+  /* ─ バッジ ─ */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded
+           text-xs font-medium;
+  }
+}
