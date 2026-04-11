@@ -141,7 +141,16 @@ function ReceivingModal({
       totalPlannedQty:  currentArrival.plannedQty,
       totalReceivedQty: newTotalReceived,
       inventoryStatus,
-      receivedDate:     currentArrival.arrivalDateRaw,
+      // 入庫確定日 = 処理を実行した日（ローカルタイムゾーン基準で YYYY-MM-DD）
+      // arrival_date（入荷予定日）ではなく「実際に確定した日」を保存する
+      receivedDate:     (() => {
+        const d = new Date()
+        return [
+          d.getFullYear(),
+          String(d.getMonth() + 1).padStart(2, '0'),
+          String(d.getDate()).padStart(2, '0'),
+        ].join('-')
+      })(),
     })
 
     setSubmitting(false)

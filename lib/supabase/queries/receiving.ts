@@ -48,7 +48,7 @@ export type ArrivalDisplay = {
   headerId:        string   // arrival_headers.id（header status 再計算に使用）
   arrivalNo:       string
   arrivalDate:     string   // 表示用フォーマット済み
-  arrivalDateRaw:  string   // DB 生値 (YYYY-MM-DD)。inventory.received_date に使用
+  arrivalDateRaw:  string   // DB 生値 (YYYY-MM-DD)。入荷予定日の表示用（inventory.received_date には使わない）
   supplierName:    string
   productId:       string
   productCode:     string
@@ -176,7 +176,7 @@ export async function confirmArrivalReceiving(params: {
   totalPlannedQty:  number
   totalReceivedQty: number   // 今回分を加えた後の累積値
   inventoryStatus:  InventoryStatus  // 入庫確定時の在庫ステータス
-  receivedDate:     string   // 入庫日 YYYY-MM-DD。arrival_headers.arrival_date を使用
+  receivedDate:     string   // 入庫確定日 YYYY-MM-DD（入庫処理を実行した日。arrival_date ではない）
 }): Promise<{ error: string | null }> {
   const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty, inventoryStatus, receivedDate } = params
 
