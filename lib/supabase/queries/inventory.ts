@@ -1,6 +1,20 @@
 import { supabase } from '@/lib/supabase/client'
 import type { InventoryItem, InventoryStatus } from '@/lib/types'
 
+// Supabase の status 値 → アプリ内 InventoryStatus へのマッピング
+// DB: 'in_stock' | 'low_stock' | 'out_of_stock'
+// App: 'normal'  | 'low'       | 'out_of_stock' | 'excess'
+function toInventoryStatus(raw: string): InventoryStatus {
+  switch (raw) {
+    case 'in_stock':    return 'normal'
+    case 'low_stock':   return 'low'
+    case 'out_of_stock': return 'out_of_stock'
+    case 'excess':      return 'excess'
+    // DB に想定外の値が入っていても落とさない
+    default:            return 'normal'
+  }
+}
+
 // ─── Supabase から返ってくる結合レスポンスの型 ────────────────
 // 実際のテーブル構造に合わせた型定義
 
@@ -10,9 +24,10 @@ type InventoryRow = {
   status:      string
   updated_at:  string
   products: {
-    product_code: string
-    category:     string
-    unit:         string
+    product_code:    string
+    product_name_ja: string
+    category:        string
+    unit:            string
   } | null
   locations: {
     location_code: string
@@ -27,15 +42,15 @@ function toInventoryItem(row: InventoryRow): InventoryItem {
 
   return {
     id:           row.id,
-    productCode:  p?.product_code  ?? '',
-    productName:  p?.product_code  ?? '',   // name_ja カラムなし → code で代替
-    category:     p?.category      ?? '',
+    productCode:  p?.product_code    ?? '',
+    productName:  p?.product_name_ja ?? '',
+    category:     p?.category        ?? '',
     quantity:     row.qty,
-    unit:         p?.unit          ?? '',
-    locationCode: l?.location_code ?? '',
-    status:       row.status as InventoryStatus,
-    minStock:     0,                         // min_stock カラムなし
-    maxStock:     0,                         // max_stock カラムなし
+    unit:         p?.unit            ?? '',
+    locationCode: l?.location_code   ?? '',
+    status:       toInventoryStatus(row.status),
+    minStock:     0,
+    maxStock:     0,
     updatedAt:    row.updated_at
       ? new Date(row.updated_at).toLocaleDateString('ja-JP', {
           year: 'numeric', month: '2-digit', day: '2-digit',
@@ -59,6 +74,7 @@ export async function fetchInventory(): Promise<{
       updated_at,
       products (
         product_code,
+        product_name_ja,
         category,
         unit
       ),

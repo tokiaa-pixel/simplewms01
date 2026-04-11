@@ -17,13 +17,15 @@ export interface Database {
       // 確認済みカラム: id, product_code, category, unit, status, created_at, updated_at
       products: {
         Row: {
-          id:           string
-          product_code: string
-          category:     string
-          unit:         string
-          status:       string
-          created_at:   string
-          updated_at:   string
+          id:               string
+          product_code:     string
+          product_name_ja:  string
+          product_name_en:  string | null
+          unit:             string
+          category:         string
+          status:           string
+          created_at:       string
+          updated_at:       string
         }
         Insert: Omit<Database['public']['Tables']['products']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['products']['Insert']>
@@ -35,6 +37,7 @@ export interface Database {
         Row: {
           id:            string
           location_code: string
+          location_name: string
           zone:          string
           status:        string
           created_at:    string

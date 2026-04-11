@@ -14,15 +14,21 @@ import {
 
 // ─── ステータスバッジ ──────────────────────────────────────────
 
+const FALLBACK_STATUS_CFG = {
+  badgeClass: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
+  dotClass:   'bg-slate-400',
+}
+
 function StatusBadge({ status }: { status: InventoryStatus }) {
   const { t } = useTranslation('status')
-  const cfg = INVENTORY_STATUS_CONFIG[status]
+  const cfg = INVENTORY_STATUS_CONFIG[status] ?? FALLBACK_STATUS_CFG
+  const labelKey = `inventory_${status}` as Parameters<typeof t>[0]
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
-      {t(`inventory_${status}` as Parameters<typeof t>[0])}
+      {t(labelKey) ?? status}
     </span>
   )
 }
