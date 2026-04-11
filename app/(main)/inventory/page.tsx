@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Package } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { Package, Loader2, AlertCircle } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
-import { inventoryData } from '@/lib/data/inventory'
+import { fetchInventory } from '@/lib/supabase/queries/inventory'
 import { useTranslation } from '@/lib/i18n'
 import {
   type InventoryItem,
@@ -197,9 +197,26 @@ export default function InventoryPage() {
   const { t: ts } = useTranslation('status')
   const { t: tc } = useTranslation('common')
 
-  const [search, setSearch] = useState('')
+  const [inventoryData, setInventoryData] = useState<InventoryItem[]>([])
+  const [loading, setLoading]             = useState(true)
+  const [fetchError, setFetchError]       = useState<string | null>(null)
+
+  const [search, setSearch]             = useState('')
   const [statusFilter, setStatusFilter] = useState<InventoryStatus | 'all'>('all')
-  const [selected, setSelected] = useState<InventoryItem | null>(null)
+  const [selected, setSelected]         = useState<InventoryItem | null>(null)
+
+  // Supabase からデータ取得
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetchInventory().then(({ data, error }) => {
+      if (cancelled) return
+      if (error) setFetchError(error)
+      else setInventoryData(data)
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const statusOptions: { value: InventoryStatus | 'all'; label: string }[] = [
     { value: 'all',         label: tc('all') },
@@ -221,7 +238,42 @@ export default function InventoryPage() {
       const matchStatus = statusFilter === 'all' || item.status === statusFilter
       return matchSearch && matchStatus
     })
-  }, [search, statusFilter])
+  }, [inventoryData, search, statusFilter])
+
+  // ─── ローディング ─────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="max-w-screen-xl space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
+        </div>
+        <div className="bg-white rounded-lg border border-slate-200 flex items-center justify-center py-24 gap-3 text-slate-400">
+          <Loader2 size={20} className="animate-spin" />
+          <span className="text-sm">{tc('loading')}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── エラー ────────────────────────────────────────────────────
+  if (fetchError) {
+    return (
+      <div className="max-w-screen-xl space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
+        </div>
+        <div className="bg-white rounded-lg border border-red-200 flex items-start gap-3 px-6 py-8 text-red-600">
+          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold">データの取得に失敗しました</p>
+            <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-screen-xl space-y-4">
