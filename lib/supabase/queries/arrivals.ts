@@ -1,36 +1,50 @@
 import { supabase } from '@/lib/supabase/client'
 import type { ArrivalStatus } from '@/lib/types'
 
+// Supabase typed client が DML の Insert/Update 型を never に解決するため、
+// INSERT / UPDATE のみ any キャストで回避する。SELECT は typed client を使用。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const from = (table: string) => (supabase as any).from(table)
+const dml = (table: string) => (supabase as any).from(table)
 
 // =============================================================
-// Raw DB 型
+// Raw DB 型（SELECT の JOIN 結果）
 // =============================================================
 
-type ArrivalRow = {
+/** arrival_headers + nested joins の生データ */
+type HeaderRaw = {
+  id:           string
+  arrival_no:   string
+  supplier_id:  string
+  arrival_date: string
+  status:       string
+  memo:         string | null
+  created_at:   string
+  suppliers: { supplier_name_ja: string } | null
+  arrival_lines: LineRaw[]
+}
+
+/** arrival_lines + nested joins の生データ */
+type LineRaw = {
   id:                  string
-  arrival_no:          string
-  arrival_date:        string
+  line_no:             number
+  product_id:          string
   planned_qty:         number
   received_qty:        number
-  product_id:          string
   planned_location_id: string | null
   status:              string
-  memo:                string | null
-  created_at:          string
-  suppliers: { id: string; supplier_name_ja: string } | null
-  products:  { product_code: string; product_name_ja: string; unit: string } | null
+  products: { product_code: string; product_name_ja: string; unit: string } | null
 }
+
 type LocationRow = { id: string; location_code: string }
 
 // =============================================================
 // エクスポート型
 // =============================================================
 
-/** 入荷予定グループ内の1明細 */
-export type ArrivalGroupItem = {
-  id:          string
+/** 入荷予定の1明細（arrival_lines 1行に対応） */
+export type ArrivalLineItem = {
+  id:          string   // arrival_lines.id
+  lineNo:      number
   productId:   string
   productCode: string
   productName: string
@@ -42,25 +56,26 @@ export type ArrivalGroupItem = {
   status:       ArrivalStatus
 }
 
-/** arrival_no 単位でまとめた入荷予定 */
+/** arrival_no 単位のグループ（arrival_headers 1行に対応） */
 export type ArrivalGroup = {
+  id:           string   // arrival_headers.id
   arrivalNo:    string
   supplierId:   string
   supplierName: string
   arrivalDate:  string
-  status:       ArrivalStatus  // items から導出
-  items:        ArrivalGroupItem[]
+  status:       ArrivalStatus  // lines から導出
+  lines:        ArrivalLineItem[]
   createdAt:    string
   memo:         string | null
 }
 
-/** フォーム用マスタ選択肢 */
+/** フォーム用選択肢 */
 export type SupplierOption = { id: string; code: string; name: string }
 export type ProductOption  = { id: string; code: string; name: string; unit: string }
 export type LocationOption = { id: string; code: string }
 
 // =============================================================
-// ステータスマッピング（receiving.ts と共通ロジック）
+// 内部ユーティリティ
 // =============================================================
 
 function toArrivalStatus(raw: string): ArrivalStatus {
@@ -73,13 +88,21 @@ function toArrivalStatus(raw: string): ArrivalStatus {
   }
 }
 
-/** グループ全体のステータスを items から導出 */
-function deriveGroupStatus(items: ArrivalGroupItem[]): ArrivalStatus {
-  const active = items.filter((i) => i.status !== 'cancelled')
+/**
+ * lines の集計から header ステータスを導出
+ *  - アクティブ line なし           → 'cancelled'
+ *  - 全 active line が completed    → 'completed'
+ *  - いずれかが received_qty > 0    → 'receiving'
+ *  - それ以外                       → 'planned'
+ */
+export function deriveHeaderStatus(
+  lines: Array<{ status: string; received_qty: number }>
+): string {
+  const active = lines.filter((l) => l.status !== 'cancelled')
   if (active.length === 0) return 'cancelled'
-  if (active.every((i) => i.status === 'completed')) return 'completed'
-  if (active.some((i) => i.status === 'completed' || i.status === 'partial')) return 'partial'
-  return 'pending'
+  if (active.every((l) => l.status === 'completed')) return 'completed'
+  if (active.some((l) => (l.received_qty ?? 0) > 0)) return 'receiving'
+  return 'planned'
 }
 
 function formatDate(raw: string): string {
@@ -97,24 +120,30 @@ export async function fetchArrivalGroups(): Promise<{
   data:  ArrivalGroup[]
   error: string | null
 }> {
+  // arrival_headers + arrival_lines の入れ子 JOIN
   const { data, error } = await supabase
-    .from('arrivals')
+    .from('arrival_headers')
     .select(`
-      id, arrival_no, arrival_date, planned_qty, received_qty,
-      product_id, planned_location_id, status, memo, created_at,
-      suppliers ( id, supplier_name_ja ),
-      products  ( product_code, product_name_ja, unit )
+      id, arrival_no, supplier_id, arrival_date, status, memo, created_at,
+      suppliers ( supplier_name_ja ),
+      arrival_lines (
+        id, line_no, product_id, planned_qty, received_qty,
+        planned_location_id, status,
+        products ( product_code, product_name_ja, unit )
+      )
     `)
-    .order('arrival_no', { ascending: false })
+    .order('arrival_date', { ascending: false })
 
   if (error) return { data: [], error: error.message }
 
-  const rows = data as unknown as ArrivalRow[]
+  const headers = data as unknown as HeaderRaw[]
 
-  // location_id → location_code 一括解決
+  // すべての planned_location_id を一括で location_code に変換
   const locationIds = [
     ...new Set(
-      rows.map((r) => r.planned_location_id).filter((v): v is string => v !== null)
+      headers.flatMap((h) =>
+        h.arrival_lines.map((l) => l.planned_location_id).filter((v): v is string => v !== null)
+      )
     ),
   ]
   let locationMap: Record<string, string> = {}
@@ -130,42 +159,41 @@ export async function fetchArrivalGroups(): Promise<{
     }
   }
 
-  // arrival_no でグループ化
-  const groupMap = new Map<string, ArrivalGroup>()
-  for (const row of rows) {
-    const locationId = row.planned_location_id ?? ''
-    const item: ArrivalGroupItem = {
-      id:           row.id,
-      productId:    row.product_id,
-      productCode:  row.products?.product_code    ?? '',
-      productName:  row.products?.product_name_ja ?? '',
-      unit:         row.products?.unit            ?? '',
-      scheduledQty: Number(row.planned_qty),
-      receivedQty:  Number(row.received_qty),
-      locationId,
-      locationCode: locationId ? (locationMap[locationId] ?? '') : '',
-      status:       toArrivalStatus(row.status),
-    }
+  const groups: ArrivalGroup[] = headers.map((h) => {
+    const lines: ArrivalLineItem[] = h.arrival_lines.map((l) => {
+      const locationId = l.planned_location_id ?? ''
+      return {
+        id:           l.id,
+        lineNo:       l.line_no,
+        productId:    l.product_id,
+        productCode:  l.products?.product_code    ?? '',
+        productName:  l.products?.product_name_ja ?? '',
+        unit:         l.products?.unit            ?? '',
+        scheduledQty: Number(l.planned_qty),
+        receivedQty:  Number(l.received_qty),
+        locationId,
+        locationCode: locationId ? (locationMap[locationId] ?? '') : '',
+        status:       toArrivalStatus(l.status),
+      }
+    })
 
-    if (!groupMap.has(row.arrival_no)) {
-      groupMap.set(row.arrival_no, {
-        arrivalNo:    row.arrival_no,
-        supplierId:   row.suppliers?.id              ?? '',
-        supplierName: row.suppliers?.supplier_name_ja ?? '',
-        arrivalDate:  formatDate(row.arrival_date),
-        status:       'pending',   // 後で導出
-        items:        [],
-        createdAt:    formatDate(row.created_at),
-        memo:         row.memo,
-      })
-    }
-    groupMap.get(row.arrival_no)!.items.push(item)
-  }
+    // DB の header status は lines 集計で上書き（整合性保証）
+    const rawStatus = deriveHeaderStatus(
+      h.arrival_lines.map((l) => ({ status: l.status, received_qty: l.received_qty }))
+    )
 
-  const groups: ArrivalGroup[] = Array.from(groupMap.values()).map((g) => ({
-    ...g,
-    status: deriveGroupStatus(g.items),
-  }))
+    return {
+      id:           h.id,
+      arrivalNo:    h.arrival_no,
+      supplierId:   h.supplier_id,
+      supplierName: h.suppliers?.supplier_name_ja ?? '',
+      arrivalDate:  formatDate(h.arrival_date),
+      status:       toArrivalStatus(rawStatus),
+      lines,
+      createdAt:    formatDate(h.created_at),
+      memo:         h.memo,
+    }
+  })
 
   return { data: groups, error: null }
 }
@@ -240,7 +268,7 @@ export async function fetchLocationOptions(): Promise<{
 }
 
 // =============================================================
-// 入荷予定番号の自動採番
+// 入荷予定番号の自動採番（arrival_headers から最新を取得）
 // =============================================================
 
 export async function generateArrivalNo(): Promise<string> {
@@ -248,26 +276,27 @@ export async function generateArrivalNo(): Promise<string> {
   const prefix = `ARR-${year}-`
 
   const { data } = await supabase
-    .from('arrivals')
+    .from('arrival_headers')
     .select('arrival_no')
     .like('arrival_no', `${prefix}%`)
     .order('arrival_no', { ascending: false })
     .limit(1)
 
-  const rows   = data as unknown as Array<{ arrival_no: string }> | null
-  const last   = rows?.[0]?.arrival_no
+  type Row = { arrival_no: string }
+  const rows    = data as unknown as Row[] | null
+  const last    = rows?.[0]?.arrival_no
   const lastNum = last ? parseInt(last.replace(prefix, ''), 10) : 0
   return `${prefix}${String(lastNum + 1).padStart(4, '0')}`
 }
 
 // =============================================================
-// 入荷予定登録（1バッチ = 同じ arrival_no で複数行 INSERT）
+// 入荷予定登録（header 1件 + lines N件）
 // =============================================================
 
 export async function createArrivalBatch(params: {
   arrivalNo:   string
   supplierId:  string
-  arrivalDate: string   // YYYY-MM-DD
+  arrivalDate: string  // YYYY-MM-DD
   memo?:       string
   items: Array<{
     productId:         string
@@ -277,19 +306,36 @@ export async function createArrivalBatch(params: {
 }): Promise<{ error: string | null }> {
   const { arrivalNo, supplierId, arrivalDate, memo, items } = params
 
-  const rows = items.map((item) => ({
-    arrival_no:          arrivalNo,
-    supplier_id:         supplierId,
-    arrival_date:        arrivalDate,
-    product_id:          item.productId,
-    planned_qty:         item.plannedQty,
-    received_qty:        0,
-    planned_location_id: item.plannedLocationId ?? null,
-    status:              'planned',
-    memo:                memo ?? null,
+  // ── Step 1: arrival_headers を INSERT して id を取得 ──────
+  const { data: headerData, error: headerErr } = await dml('arrival_headers')
+    .insert({
+      arrival_no:   arrivalNo,
+      supplier_id:  supplierId,
+      arrival_date: arrivalDate,
+      status:       'planned',
+      memo:         memo ?? null,
+    })
+    .select('id')
+    .single()
+
+  if (headerErr) return { error: `ヘッダー登録エラー: ${headerErr.message}` }
+
+  const headerId = (headerData as unknown as { id: string }).id
+
+  // ── Step 2: arrival_lines を一括 INSERT ──────────────────
+  const lines = items.map((item, idx) => ({
+    header_id:            headerId,
+    line_no:              idx + 1,
+    product_id:           item.productId,
+    planned_qty:          item.plannedQty,
+    received_qty:         0,
+    planned_location_id:  item.plannedLocationId ?? null,
+    status:               'planned',
   }))
 
-  const { error } = await from('arrivals').insert(rows)
-  if (error) return { error: error.message }
+  const { error: linesErr } = await dml('arrival_lines').insert(lines)
+
+  if (linesErr) return { error: `明細登録エラー: ${linesErr.message}` }
+
   return { error: null }
 }

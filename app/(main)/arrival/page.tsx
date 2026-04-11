@@ -11,7 +11,7 @@ import {
 } from '@/lib/types'
 import {
   type ArrivalGroup,
-  type ArrivalGroupItem,
+  type ArrivalLineItem,
   type SupplierOption,
   type ProductOption,
   type LocationOption,
@@ -387,8 +387,8 @@ function ArrivalDetailModal({
   const { t }  = useTranslation('arrival')
   const { t: tc } = useTranslation('common')
 
-  const totalScheduled = group.items.reduce((s, i) => s + i.scheduledQty, 0)
-  const totalReceived  = group.items.reduce((s, i) => s + i.receivedQty,  0)
+  const totalScheduled = group.lines.reduce((s, i) => s + i.scheduledQty, 0)
+  const totalReceived  = group.lines.reduce((s, i) => s + i.receivedQty,  0)
 
   return (
     <Modal title={`${t('modalDetailTitle')} - ${group.arrivalNo}`} onClose={onClose} size="lg">
@@ -430,7 +430,7 @@ function ArrivalDetailModal({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {group.items.map((item: ArrivalGroupItem) => {
+              {group.lines.map((item: ArrivalLineItem) => {
                 const remaining = item.scheduledQty - item.receivedQty
                 const isDone    = remaining <= 0
                 return (
@@ -641,7 +641,7 @@ export default function ArrivalPage() {
                 <p className="text-sm font-medium text-slate-700 mb-1">{group.supplierName}</p>
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>{group.arrivalDate}</span>
-                  <span>{group.items.length} {tc('itemUnit')}</span>
+                  <span>{group.lines.length} {tc('itemUnit')}</span>
                 </div>
               </div>
             ))
@@ -684,7 +684,7 @@ export default function ArrivalPage() {
                     <td className="px-4 py-3 text-slate-700">{group.supplierName}</td>
                     <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-xs">{group.arrivalDate}</td>
                     <td className="px-4 py-3 text-right text-slate-700 tabular-nums">
-                      {group.items.length}
+                      {group.lines.length}
                       <span className="text-xs text-slate-400 ml-1">{tc('itemUnit')}</span>
                     </td>
                     <td className="px-4 py-3">

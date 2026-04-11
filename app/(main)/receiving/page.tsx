@@ -130,7 +130,8 @@ function ReceivingModal({
     const isComplete       = newTotalReceived >= currentArrival.plannedQty
 
     const { error: err } = await confirmArrivalReceiving({
-      arrivalId:        currentArrival.id,
+      lineId:           currentArrival.id,
+      headerId:         currentArrival.headerId,
       productId:        currentArrival.productId,
       locationId:       currentArrival.locationId,
       addQty:           qty,

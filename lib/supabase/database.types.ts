@@ -173,13 +173,43 @@ export interface Database {
         }
       }
 
-      // ─── 入荷予定 ─────────────────────────────────────────────
-      arrivals: {
+      // ─── 入荷予定ヘッダー ─────────────────────────────────────
+      arrival_headers: {
+        Row: {
+          id:           string
+          arrival_no:   string
+          supplier_id:  string
+          arrival_date: string
+          status:       string
+          memo:         string | null
+          created_by:   string | null
+          created_at:   string
+          updated_at:   string
+        }
+        Insert: {
+          arrival_no:   string
+          supplier_id:  string
+          arrival_date: string
+          status?:      string
+          memo?:        string | null
+          created_by?:  string | null
+        }
+        Update: {
+          arrival_no?:   string
+          supplier_id?:  string
+          arrival_date?: string
+          status?:       string
+          memo?:         string | null
+          created_by?:   string | null
+        }
+      }
+
+      // ─── 入荷予定明細 ─────────────────────────────────────────
+      arrival_lines: {
         Row: {
           id:                  string
-          arrival_no:          string
-          supplier_id:         string
-          arrival_date:        string
+          header_id:           string
+          line_no:             number
           product_id:          string
           planned_qty:         number
           received_qty:        number
@@ -187,14 +217,12 @@ export interface Database {
           actual_location_id:  string | null
           status:              string
           memo:                string | null
-          created_by:          string | null
           created_at:          string
           updated_at:          string
         }
         Insert: {
-          arrival_no:           string
-          supplier_id:          string
-          arrival_date:         string
+          header_id:            string
+          line_no:              number
           product_id:           string
           planned_qty:          number
           received_qty?:        number
@@ -202,12 +230,10 @@ export interface Database {
           actual_location_id?:  string | null
           status?:              string
           memo?:                string | null
-          created_by?:          string | null
         }
         Update: {
-          arrival_no?:          string
-          supplier_id?:         string
-          arrival_date?:        string
+          header_id?:           string
+          line_no?:             number
           product_id?:          string
           planned_qty?:         number
           received_qty?:        number
@@ -215,7 +241,6 @@ export interface Database {
           actual_location_id?:  string | null
           status?:              string
           memo?:                string | null
-          created_by?:          string | null
         }
       }
 
