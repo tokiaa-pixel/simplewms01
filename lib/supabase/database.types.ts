@@ -65,48 +65,91 @@ export interface Database {
       }
 
       // ─── 仕入先マスタ ─────────────────────────────────────────
+      // 確認済みカラム: supplier_code, supplier_name_ja, supplier_name_en,
+      //                contact_name, phone, email, address, status
       suppliers: {
         Row: {
-          id:         string
-          created_at: string
-          updated_at: string
-          [key: string]: unknown
+          id:               string
+          supplier_code:    string
+          supplier_name_ja: string
+          supplier_name_en: string | null
+          contact_name:     string | null
+          phone:            string | null
+          email:            string | null
+          address:          string | null
+          status:           string
+          created_at:       string
+          updated_at:       string
         }
         Insert: Omit<Database['public']['Tables']['suppliers']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['suppliers']['Insert']>
       }
 
       // ─── 得意先マスタ ─────────────────────────────────────────
+      // 確認済みカラム: customer_code, customer_name_ja, customer_name_en,
+      //                contact_name, phone, email, address, status
       customers: {
         Row: {
-          id:         string
-          created_at: string
-          updated_at: string
-          [key: string]: unknown
+          id:               string
+          customer_code:    string
+          customer_name_ja: string
+          customer_name_en: string | null
+          contact_name:     string | null
+          phone:            string | null
+          email:            string | null
+          address:          string | null
+          status:           string
+          created_at:       string
+          updated_at:       string
         }
         Insert: Omit<Database['public']['Tables']['customers']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['customers']['Insert']>
       }
 
       // ─── 入荷予定 ─────────────────────────────────────────────
+      // 確認済みカラム: arrival_no, supplier_id, arrival_date, product_id,
+      //                planned_qty, received_qty, planned_location_id,
+      //                actual_location_id, status, memo, created_by
       arrivals: {
         Row: {
-          id:         string
-          created_at: string
-          updated_at: string
-          [key: string]: unknown
+          id:                  string
+          arrival_no:          string
+          supplier_id:         string
+          arrival_date:        string
+          product_id:          string
+          planned_qty:         number
+          received_qty:        number
+          planned_location_id: string | null
+          actual_location_id:  string | null
+          status:              string
+          memo:                string | null
+          created_by:          string | null
+          created_at:          string
+          updated_at:          string
         }
         Insert: Omit<Database['public']['Tables']['arrivals']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['arrivals']['Insert']>
       }
 
       // ─── 出庫指示 ─────────────────────────────────────────────
+      // 確認済みカラム: shipping_no, shipping_date, customer_id, product_id,
+      //                requested_qty, shipped_qty, from_location_id,
+      //                status, memo, created_by
       shippings: {
         Row: {
-          id:         string
-          created_at: string
-          updated_at: string
-          [key: string]: unknown
+          id:               string
+          shipping_no:      string
+          shipping_date:    string
+          customer_id:      string
+          product_id:       string
+          requested_qty:    number
+          shipped_qty:      number
+          from_location_id: string | null
+          status:           string
+          memo:             string | null
+          created_by:       string | null
+          created_at:       string
+          updated_at:       string
         }
         Insert: Omit<Database['public']['Tables']['shippings']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['shippings']['Insert']>

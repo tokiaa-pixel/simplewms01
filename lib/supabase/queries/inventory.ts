@@ -2,16 +2,20 @@ import { supabase } from '@/lib/supabase/client'
 import type { InventoryItem, InventoryStatus } from '@/lib/types'
 
 // Supabase の status 値 → アプリ内 InventoryStatus へのマッピング
-// DB: 'in_stock' | 'low_stock' | 'out_of_stock'
-// App: 'normal'  | 'low'       | 'out_of_stock' | 'excess'
+// DB: 'available' | 'hold' | 'damaged'
+// App: 'normal'   | 'low'  | 'out_of_stock' | 'excess'
 function toInventoryStatus(raw: string): InventoryStatus {
   switch (raw) {
-    case 'in_stock':    return 'normal'
-    case 'low_stock':   return 'low'
+    case 'available':    return 'normal'
+    case 'hold':         return 'low'          // 保留中 → 残少扱い
+    case 'damaged':      return 'out_of_stock' // 破損品 → 在庫なし扱い
+    // 旧値との後方互換
+    case 'in_stock':     return 'normal'
+    case 'low_stock':    return 'low'
     case 'out_of_stock': return 'out_of_stock'
-    case 'excess':      return 'excess'
-    // DB に想定外の値が入っていても落とさない
-    default:            return 'normal'
+    case 'excess':       return 'excess'
+    // 未知の値でも落とさない
+    default:             return 'normal'
   }
 }
 
