@@ -101,6 +101,7 @@ export async function fetchArrivals(): Promise<{
     )
   )
 
+  type LocationRow = { id: string; location_code: string }
   let locationMap: Record<string, string> = {}
   if (locationIds.length > 0) {
     const { data: locs } = await supabase
@@ -108,7 +109,9 @@ export async function fetchArrivals(): Promise<{
       .select('id, location_code')
       .in('id', locationIds)
     if (locs) {
-      locationMap = Object.fromEntries(locs.map((l) => [l.id, l.location_code]))
+      locationMap = Object.fromEntries(
+        (locs as LocationRow[]).map((l) => [l.id, l.location_code])
+      )
     }
   }
 
