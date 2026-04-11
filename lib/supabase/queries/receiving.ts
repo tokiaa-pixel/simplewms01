@@ -180,12 +180,15 @@ export async function confirmArrivalReceiving(params: {
   if (!locationId)  return { error: 'ロケーションが設定されていません' }
 
   try {
-    // ── Step 1: 在庫の既存レコードを確認 ──────────────────────
+    // ── Step 1: 在庫の既存レコードを確認（status も一致条件に含める） ──
+    // product_id + location_id + status の組み合わせで検索することで、
+    // 同じ商品・同じロケーションでも status が異なれば別レコードとして扱う
     const { data: existingRaw, error: selectErr } = await supabase
       .from('inventory')
       .select('id, qty')
       .eq('product_id', productId)
       .eq('location_id', locationId)
+      .eq('status', inventoryStatus)
       .maybeSingle()
 
     if (selectErr) throw new Error(`在庫検索エラー: ${selectErr.message}`)
@@ -194,8 +197,10 @@ export async function confirmArrivalReceiving(params: {
 
     // ── Step 2: inventory を upsert（加算 or 新規） ───────────
     if (existing) {
+      // 同一 product_id + location_id + status のレコードが存在 → qty のみ加算
+      // status は既に一致しているため変更不要
       const { error: updateErr } = await dml('inventory')
-        .update({ qty: Math.max(0, existing.qty + addQty), status: inventoryStatus })
+        .update({ qty: Math.max(0, existing.qty + addQty) })
         .eq('id', existing.id)
 
       if (updateErr) throw new Error(`在庫更新エラー: ${updateErr.message}`)
