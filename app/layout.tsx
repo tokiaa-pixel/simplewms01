@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { AuthProvider } from '@/store/AuthContext'
+import { LanguageProvider } from '@/store/LanguageContext'
 
 export const metadata: Metadata = {
-  title: 'SimpleWMS - 在庫管理システム',
-  description: 'シンプルな在庫管理システム',
+  title: 'SimpleWMS',
+  description: 'Warehouse Management System',
 }
 
 export default function RootLayout({
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className="antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </LanguageProvider>
       </body>
     </html>
   )

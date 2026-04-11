@@ -19,17 +19,19 @@ import {
   SHIPPING_STATUS_CONFIG,
 } from '@/lib/types'
 import { todayIso } from '@/lib/utils'
+import { useTranslation } from '@/lib/i18n'
 
 // ─── ステータスバッジ ──────────────────────────────────────────
 
 function ShippingStatusBadge({ status }: { status: ShippingStatus }) {
+  const { t } = useTranslation('status')
   const cfg = SHIPPING_STATUS_CONFIG[status]
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
-      {cfg.label}
+      {t(`shipping_${status}` as Parameters<typeof t>[0])}
     </span>
   )
 }
@@ -43,10 +45,11 @@ function PickingModal({
   order: ShippingOrder
   onClose: () => void
 }) {
+  const { t } = useTranslation('shipping')
+  const { t: tc } = useTranslation('common')
   const { startPicking } = useWms()
   const [done, setDone] = useState(false)
 
-  // ロケーション順にソート（倉庫内の動線効率化）
   const sortedItems = [...order.items].sort((a, b) =>
     a.locationCode.localeCompare(b.locationCode)
   )
@@ -58,18 +61,18 @@ function PickingModal({
 
   if (done) {
     return (
-      <Modal title="ピッキング開始" onClose={onClose} size="sm">
+      <Modal title={t('pickingModalTitle')} onClose={onClose} size="sm">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle size={40} className="text-blue-500" />
           <p className="text-sm font-semibold text-slate-700">
-            ピッキングを開始しました
+            {t('pickingStarted')}
           </p>
           <p className="text-xs text-slate-500">{order.code}</p>
           <button
             onClick={onClose}
             className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
           >
-            閉じる
+            {tc('close')}
           </button>
         </div>
       </Modal>
@@ -77,15 +80,15 @@ function PickingModal({
   }
 
   return (
-    <Modal title={`ピッキングリスト - ${order.code}`} onClose={onClose} size="lg">
+    <Modal title={`${t('pickingListTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* ヘッダー情報 */}
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
           {[
-            ['出庫指示番号', <span className="font-mono font-medium">{order.code}</span>],
-            ['出荷先', order.customerName],
-            ['出庫予定日', order.requestedDate],
-            ['品目数', `${order.items.length} 品目`],
+            [t('detailCode'), <span key="code" className="font-mono font-medium">{order.code}</span>],
+            [t('detailCustomer'), order.customerName],
+            [t('detailScheduledDate'), order.requestedDate],
+            [t('detailItemCount'), `${order.items.length} ${t('cardItemUnit')}`],
           ].map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</dt>
@@ -102,20 +105,20 @@ function PickingModal({
           </div>
         )}
 
-        {/* ピッキングリスト（ロケーション順） */}
+        {/* ピッキングリスト */}
         <div>
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            ピッキングリスト（棚番順）
+            {t('pickingListTitle')}
           </p>
           <div className="border border-slate-200 rounded-lg overflow-hidden">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">棚番</th>
-                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品コード</th>
-                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品名</th>
-                  <th className="px-4 py-2.5 text-right font-medium text-slate-500">指示数量</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-slate-500">完了</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblShelf')}</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                  <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDone')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -148,14 +151,14 @@ function PickingModal({
             onClick={onClose}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
-            キャンセル
+            {tc('cancel')}
           </button>
           <button
             onClick={handleStart}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium flex items-center justify-center gap-2"
           >
             <ScanLine size={15} />
-            ピッキング開始
+            {t('pickingStartBtn')}
           </button>
         </div>
       </div>
@@ -172,6 +175,8 @@ function InspectionModal({
   order: ShippingOrder
   onClose: () => void
 }) {
+  const { t } = useTranslation('shipping')
+  const { t: tc } = useTranslation('common')
   const { completeInspection } = useWms()
   const [pickedQty, setPickedQty] = useState<Record<string, string>>(
     () =>
@@ -187,7 +192,7 @@ function InspectionModal({
       const qty = parseInt(pickedQty[item.id] ?? '0') || 0
       if (qty < 0 || qty > item.orderedQuantity) {
         setError(
-          `${item.productName}: 数量は 0〜${item.orderedQuantity} の範囲で入力してください`
+          `${item.productName}: 0〜${item.orderedQuantity}`
         )
         return
       }
@@ -203,16 +208,16 @@ function InspectionModal({
 
   if (done) {
     return (
-      <Modal title="検品完了" onClose={onClose} size="sm">
+      <Modal title={t('inspectionModalTitle')} onClose={onClose} size="sm">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle size={40} className="text-purple-500" />
-          <p className="text-sm font-semibold text-slate-700">検品が完了しました</p>
+          <p className="text-sm font-semibold text-slate-700">{t('inspectionDone')}</p>
           <p className="text-xs text-slate-500">{order.code}</p>
           <button
             onClick={onClose}
             className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
           >
-            閉じる
+            {tc('close')}
           </button>
         </div>
       </Modal>
@@ -220,13 +225,13 @@ function InspectionModal({
   }
 
   return (
-    <Modal title={`検品 - ${order.code}`} onClose={onClose} size="lg">
+    <Modal title={`${t('inspectionModalTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* ヘッダー */}
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
           {[
-            ['出庫指示番号', <span className="font-mono font-medium">{order.code}</span>],
-            ['出荷先', order.customerName],
+            [t('detailCode'), <span key="code" className="font-mono font-medium">{order.code}</span>],
+            [t('detailCustomer'), order.customerName],
           ].map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</dt>
@@ -237,20 +242,18 @@ function InspectionModal({
           ))}
         </div>
 
-        <p className="text-xs text-slate-500">
-          ピッキングした実際の数量を入力してください。指示数量と異なる場合のみ修正します。
-        </p>
+        <p className="text-xs text-slate-500">{t('inspectionNote')}</p>
 
         {/* 検品テーブル */}
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">棚番</th>
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品名</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">指示数量</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">実績数量</th>
-                <th className="px-4 py-2.5 text-center font-medium text-slate-500">差異</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblShelf')}</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyActual')}</th>
+                <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDiff')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -308,14 +311,14 @@ function InspectionModal({
             onClick={onClose}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
-            キャンセル
+            {tc('cancel')}
           </button>
           <button
             onClick={handleComplete}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2"
           >
             <CheckCircle size={15} />
-            検品完了
+            {t('inspectionCompleteBtn')}
           </button>
         </div>
       </div>
@@ -332,6 +335,8 @@ function ConfirmShippingModal({
   order: ShippingOrder
   onClose: () => void
 }) {
+  const { t } = useTranslation('shipping')
+  const { t: tc } = useTranslation('common')
   const { confirmShipping } = useWms()
   const [shippedDate, setShippedDate] = useState(todayIso())
   const [done, setDone] = useState(false)
@@ -346,16 +351,16 @@ function ConfirmShippingModal({
 
   if (done) {
     return (
-      <Modal title="出庫確定完了" onClose={onClose} size="sm">
+      <Modal title={t('confirmModalTitle')} onClose={onClose} size="sm">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle size={40} className="text-green-500" />
-          <p className="text-sm font-semibold text-slate-700">出庫が確定しました</p>
+          <p className="text-sm font-semibold text-slate-700">{t('confirmDone')}</p>
           <p className="text-xs text-slate-500">{order.code}</p>
           <button
             onClick={onClose}
             className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
           >
-            閉じる
+            {tc('close')}
           </button>
         </div>
       </Modal>
@@ -363,17 +368,17 @@ function ConfirmShippingModal({
   }
 
   return (
-    <Modal title={`出庫確定 - ${order.code}`} onClose={onClose} size="md">
+    <Modal title={`${t('confirmModalTitle')} - ${order.code}`} onClose={onClose} size="md">
       <div className="space-y-5">
         {/* サマリ */}
         <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 space-y-1.5">
           {[
-            ['出庫指示番号', order.code],
-            ['出荷先', order.customerName],
-            ['出庫予定日', order.requestedDate],
-            ['品目数', `${order.items.length} 品目`],
-            ['指示数量合計', `${totalOrdered} 個`],
-            ['実績数量合計', `${totalPicked} 個`],
+            [t('detailCode'), order.code],
+            [t('detailCustomer'), order.customerName],
+            [t('detailScheduledDate'), order.requestedDate],
+            [t('detailItemCount'), `${order.items.length} ${t('cardItemUnit')}`],
+            [t('detailTotalOrdered'), `${totalOrdered} ${tc('pieces')}`],
+            [t('detailTotalPicked'), `${totalPicked} ${tc('pieces')}`],
           ].map(([label, value]) => (
             <div key={label} className="flex items-center gap-2">
               <dt className="text-xs text-green-700 w-28 flex-shrink-0">{label}</dt>
@@ -387,9 +392,9 @@ function ConfirmShippingModal({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品名</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">指示</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">実績</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyInstr')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyResult')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -415,7 +420,7 @@ function ConfirmShippingModal({
         {/* 出荷日 */}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">
-            出荷日 <span className="text-red-500">*</span>
+            {t('shipDate')} <span className="text-red-500">*</span>
           </label>
           <input
             type="date"
@@ -430,14 +435,14 @@ function ConfirmShippingModal({
             onClick={onClose}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
-            キャンセル
+            {tc('cancel')}
           </button>
           <button
             onClick={handleConfirm}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
           >
             <Truck size={15} />
-            出庫確定
+            {t('confirmBtn')}
           </button>
         </div>
       </div>
@@ -454,19 +459,21 @@ function DetailModal({
   order: ShippingOrder
   onClose: () => void
 }) {
+  const { t } = useTranslation('shipping')
+
   return (
-    <Modal title={`出庫詳細 - ${order.code}`} onClose={onClose} size="lg">
+    <Modal title={`${t('detailModalTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
           {[
-            ['出庫指示番号', <span className="font-mono">{order.code}</span>],
-            ['ステータス', <ShippingStatusBadge status={order.status} />],
-            ['出荷先', order.customerName],
-            ['出庫予定日', order.requestedDate],
+            [t('detailCode'), <span key="code" className="font-mono">{order.code}</span>],
+            [t('colStatus'), <ShippingStatusBadge key="status" status={order.status} />],
+            [t('detailCustomer'), order.customerName],
+            [t('detailScheduledDate'), order.requestedDate],
             ...(order.shippedDate
-              ? [['実際の出荷日', order.shippedDate]]
+              ? [[t('detailShipDate'), order.shippedDate]]
               : []),
-            ['登録日', order.createdAt],
+            [t('detailCreated'), order.createdAt],
           ].map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</dt>
@@ -487,10 +494,10 @@ function DetailModal({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">棚番</th>
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品名</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">指示数量</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">実績数量</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblShelf')}</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyActual')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -516,18 +523,6 @@ function DetailModal({
   )
 }
 
-// ─── タブフィルタ ──────────────────────────────────────────────
-
-type TabValue = 'all' | ShippingStatus
-
-const TABS: { value: TabValue; label: string }[] = [
-  { value: 'all', label: 'すべて' },
-  { value: 'pending', label: '未処理' },
-  { value: 'picking', label: 'ピッキング中' },
-  { value: 'inspected', label: '検品済み' },
-  { value: 'shipped', label: '出庫完了' },
-]
-
 // ─── モーダルの種類を判定 ─────────────────────────────────────
 
 function getModalType(
@@ -544,15 +539,17 @@ function getModalType(
 // ─── メインページ ─────────────────────────────────────────────
 
 export default function ShippingMenuPage() {
+  const { t } = useTranslation('shipping')
+  const { t: tc } = useTranslation('common')
+  const { t: ts } = useTranslation('status')
   const { state } = useWms()
-  const [activeTab, setActiveTab] = useState<TabValue>('all')
+  const [activeTab, setActiveTab] = useState<'all' | ShippingStatus>('all')
   const [search, setSearch] = useState('')
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null)
   const tableRef = useRef<HTMLDivElement>(null)
 
   const orders = state.shippingOrders
 
-  // ステータス別件数
   const counts = useMemo(
     () => ({
       pending: orders.filter((o) => o.status === 'pending').length,
@@ -563,7 +560,14 @@ export default function ShippingMenuPage() {
     [orders]
   )
 
-  // フィルタ済みリスト
+  const TABS = useMemo(() => [
+    { value: 'all' as const,       label: t('tabAll') },
+    { value: 'pending' as const,   label: t('tabPending') },
+    { value: 'picking' as const,   label: t('tabPicking') },
+    { value: 'inspected' as const, label: t('tabInspected') },
+    { value: 'shipped' as const,   label: t('tabShipped') },
+  ], [t])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return orders.filter((o) => {
@@ -576,11 +580,53 @@ export default function ShippingMenuPage() {
     })
   }, [orders, activeTab, search])
 
-  const handleOperationClick = (tab: TabValue) => {
+  const handleOperationClick = (tab: 'all' | ShippingStatus) => {
     setActiveTab(tab)
     setTimeout(() => {
       tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 50)
+  }
+
+  const summaryItems = [
+    {
+      status: 'pending' as ShippingStatus,
+      label: t('summaryPending'),
+      count: counts.pending,
+      bg: 'bg-slate-50',
+      border: 'border-slate-200',
+      countColor: 'text-slate-700',
+    },
+    {
+      status: 'picking' as ShippingStatus,
+      label: t('summaryPicking'),
+      count: counts.picking,
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+      countColor: 'text-blue-700',
+    },
+    {
+      status: 'inspected' as ShippingStatus,
+      label: t('summaryInspected'),
+      count: counts.inspected,
+      bg: 'bg-purple-50',
+      border: 'border-purple-200',
+      countColor: 'text-purple-700',
+    },
+    {
+      status: 'shipped' as ShippingStatus,
+      label: t('summaryShipped'),
+      count: counts.shipped,
+      bg: 'bg-green-50',
+      border: 'border-green-200',
+      countColor: 'text-green-700',
+    },
+  ]
+
+  const actionLabels: Record<'picking' | 'inspection' | 'confirm' | 'detail', string> = {
+    picking: t('actionPicking'),
+    inspection: t('actionInspection'),
+    confirm: t('actionConfirm'),
+    detail: t('actionDetail'),
   }
 
   return (
@@ -588,56 +634,21 @@ export default function ShippingMenuPage() {
       {/* ページヘッダー */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">出庫処理メニュー</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            出庫指示の登録から出荷確定まで一元管理します
-          </p>
+          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
         </div>
         <Link
           href="/shipping/input"
           className="flex items-center gap-2 px-4 py-2.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
         >
           <PackageMinus size={15} />
-          出庫入力
+          {t('toInput')}
         </Link>
       </div>
 
       {/* ステータスサマリバー */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          {
-            status: 'pending' as ShippingStatus,
-            label: '未処理',
-            count: counts.pending,
-            bg: 'bg-slate-50',
-            border: 'border-slate-200',
-            countColor: 'text-slate-700',
-          },
-          {
-            status: 'picking' as ShippingStatus,
-            label: 'ピッキング中',
-            count: counts.picking,
-            bg: 'bg-blue-50',
-            border: 'border-blue-200',
-            countColor: 'text-blue-700',
-          },
-          {
-            status: 'inspected' as ShippingStatus,
-            label: '検品済み',
-            count: counts.inspected,
-            bg: 'bg-purple-50',
-            border: 'border-purple-200',
-            countColor: 'text-purple-700',
-          },
-          {
-            status: 'shipped' as ShippingStatus,
-            label: '出庫完了',
-            count: counts.shipped,
-            bg: 'bg-green-50',
-            border: 'border-green-200',
-            countColor: 'text-green-700',
-          },
-        ].map((item) => (
+        {summaryItems.map((item) => (
           <button
             key={item.status}
             onClick={() => handleOperationClick(item.status)}
@@ -646,7 +657,7 @@ export default function ShippingMenuPage() {
             <p className="text-xs text-slate-500 mb-1">{item.label}</p>
             <p className={`text-2xl font-bold tabular-nums ${item.countColor}`}>
               {item.count}
-              <span className="text-sm font-normal ml-1">件</span>
+              <span className="text-sm font-normal ml-1">{tc('countUnit')}</span>
             </p>
           </button>
         ))}
@@ -664,19 +675,17 @@ export default function ShippingMenuPage() {
               <ScanLine size={18} className="text-blue-600" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-700">ピッキング</p>
-              <p className="text-xs text-slate-400">未処理 → ピッキング中</p>
+              <p className="text-sm font-semibold text-slate-700">{t('menuPickingTitle')}</p>
+              <p className="text-xs text-slate-400">{t('menuPickingSubtitle')}</p>
             </div>
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold text-blue-600 tabular-nums">
               {counts.pending}
             </span>
-            <span className="text-xs text-slate-500">件待ち</span>
+            <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
           </div>
-          <p className="text-xs text-slate-400 mt-2">
-            倉庫内でピッキングリストに沿って商品を集めます
-          </p>
+          <p className="text-xs text-slate-400 mt-2">{t('menuPickingDesc')}</p>
         </button>
 
         {/* 検品 */}
@@ -689,19 +698,17 @@ export default function ShippingMenuPage() {
               <SearchIcon size={18} className="text-purple-600" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-700">検品</p>
-              <p className="text-xs text-slate-400">ピッキング中 → 検品済み</p>
+              <p className="text-sm font-semibold text-slate-700">{t('menuInspectionTitle')}</p>
+              <p className="text-xs text-slate-400">{t('menuInspectionSubtitle')}</p>
             </div>
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold text-purple-600 tabular-nums">
               {counts.picking}
             </span>
-            <span className="text-xs text-slate-500">件待ち</span>
+            <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
           </div>
-          <p className="text-xs text-slate-400 mt-2">
-            ピッキングした商品の数量・品目を確認します
-          </p>
+          <p className="text-xs text-slate-400 mt-2">{t('menuInspectionDesc')}</p>
         </button>
 
         {/* 出庫確定 */}
@@ -714,19 +721,17 @@ export default function ShippingMenuPage() {
               <Truck size={18} className="text-green-600" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-700">出庫確定</p>
-              <p className="text-xs text-slate-400">検品済み → 出庫完了</p>
+              <p className="text-sm font-semibold text-slate-700">{t('menuConfirmTitle')}</p>
+              <p className="text-xs text-slate-400">{t('menuConfirmSubtitle')}</p>
             </div>
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold text-green-600 tabular-nums">
               {counts.inspected}
             </span>
-            <span className="text-xs text-slate-500">件待ち</span>
+            <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
           </div>
-          <p className="text-xs text-slate-400 mt-2">
-            出荷日を確定し、在庫から出庫処理を行います
-          </p>
+          <p className="text-xs text-slate-400 mt-2">{t('menuConfirmDesc')}</p>
         </button>
       </div>
 
@@ -736,12 +741,12 @@ export default function ShippingMenuPage() {
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1">
             <ClipboardList size={15} className="text-slate-400" />
-            <span className="text-sm font-semibold text-slate-700">出庫指示一覧</span>
+            <span className="text-sm font-semibold text-slate-700">{t('listTitle')}</span>
           </div>
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="番号・出荷先で検索"
+            placeholder={t('searchPlaceholder')}
             className="ml-2"
           />
         </div>
@@ -782,17 +787,12 @@ export default function ShippingMenuPage() {
           {filtered.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
               <Truck size={28} />
-              <p className="text-sm">該当する出庫指示がありません</p>
+              <p className="text-sm">{t('empty')}</p>
             </div>
           ) : (
             filtered.map((order) => {
               const modalType = getModalType(order.status)
-              const nextActionLabel = {
-                picking: 'ピッキング開始',
-                inspection: '検品',
-                confirm: '出庫確定',
-                detail: '詳細確認',
-              }[modalType]
+              const nextActionLabel = actionLabels[modalType]
               const nextActionStyle = {
                 picking: 'text-blue-600 bg-blue-50',
                 inspection: 'text-purple-600 bg-purple-50',
@@ -808,7 +808,9 @@ export default function ShippingMenuPage() {
                   </div>
                   <p className="text-sm font-medium text-slate-700 mb-2">{order.customerName}</p>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">{order.requestedDate} / {order.items.length}品目</span>
+                    <span className="text-xs text-slate-500">
+                      {order.requestedDate} / {order.items.length} {t('cardItemUnit')}
+                    </span>
                     <button
                       onClick={() => setSelectedOrder(order)}
                       className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${nextActionStyle}`}
@@ -828,22 +830,22 @@ export default function ShippingMenuPage() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  出庫指示番号
+                  {t('colCode')}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                  出荷先
+                  {t('colCustomer')}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  出庫予定日
+                  {t('colDate')}
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  品目数
+                  {t('colItems')}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  ステータス
+                  {t('colStatus')}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  次の操作
+                  {t('colNextAction')}
                 </th>
               </tr>
             </thead>
@@ -853,19 +855,14 @@ export default function ShippingMenuPage() {
                   <td colSpan={6} className="py-14 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <Truck size={28} />
-                      <p className="text-sm">該当する出庫指示がありません</p>
+                      <p className="text-sm">{t('empty')}</p>
                     </div>
                   </td>
                 </tr>
               ) : (
                 filtered.map((order) => {
                   const modalType = getModalType(order.status)
-                  const nextActionLabel = {
-                    picking: 'ピッキング開始',
-                    inspection: '検品',
-                    confirm: '出庫確定',
-                    detail: '詳細確認',
-                  }[modalType]
+                  const nextActionLabel = actionLabels[modalType]
                   const nextActionStyle = {
                     picking: 'text-blue-600 bg-blue-50 hover:bg-blue-100',
                     inspection: 'text-purple-600 bg-purple-50 hover:bg-purple-100',
@@ -892,7 +889,7 @@ export default function ShippingMenuPage() {
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-700">
                         {order.items.length}
-                        <span className="text-xs text-slate-400 ml-1">品目</span>
+                        <span className="text-xs text-slate-400 ml-1">{t('cardItemUnit')}</span>
                       </td>
                       <td className="px-4 py-3">
                         <ShippingStatusBadge status={order.status} />

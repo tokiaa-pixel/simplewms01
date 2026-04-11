@@ -2,30 +2,44 @@
 
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/store/AuthContext'
+import { useTranslation } from '@/lib/i18n'
 import { LogOut, ChevronRight, UserCircle2, Menu } from 'lucide-react'
+import LanguageSwitcher from './LanguageSwitcher'
 
-const PAGE_META: Record<string, { title: string; parent?: string }> = {
-  '/dashboard':     { title: 'ダッシュボード' },
-  '/arrival':       { title: '入荷予定登録',    parent: '入荷・入庫' },
-  '/receiving':     { title: '入庫処理',        parent: '入荷・入庫' },
-  '/inventory':     { title: '在庫一覧',        parent: '在庫' },
-  '/shipping':      { title: '出庫処理メニュー', parent: '出庫' },
-  '/shipping/input':{ title: '出庫入力',        parent: '出庫' },
-  '/master':        { title: 'マスタ管理',      parent: '設定' },
+const PAGE_KEYS: Record<string, { titleKey: string; parentKey?: string }> = {
+  '/dashboard':      { titleKey: 'nav.dashboard' },
+  '/arrival':        { titleKey: 'nav.arrival',       parentKey: 'nav.groupInbound' },
+  '/receiving':      { titleKey: 'nav.receiving',     parentKey: 'nav.groupInbound' },
+  '/inventory':      { titleKey: 'nav.inventory',     parentKey: 'nav.groupInventory' },
+  '/shipping':       { titleKey: 'nav.shipping',      parentKey: 'nav.groupOutbound' },
+  '/shipping/input': { titleKey: 'nav.shippingInput', parentKey: 'nav.groupOutbound' },
+  '/master':         { titleKey: 'nav.master',        parentKey: 'nav.groupSettings' },
 }
 
-const ROLE_CONFIG: Record<string, { label: string; style: string }> = {
-  admin:    { label: '管理者',       style: 'bg-brand-teal/10 text-brand-teal border border-brand-teal/30' },
-  manager:  { label: 'マネージャー', style: 'bg-purple-50 text-purple-700 border border-purple-200' },
-  operator: { label: '担当者',       style: 'bg-slate-100 text-slate-600 border border-slate-200' },
+const ROLE_STYLE: Record<string, string> = {
+  admin:    'bg-brand-teal/10 text-brand-teal border border-brand-teal/30',
+  manager:  'bg-purple-50 text-purple-700 border border-purple-200',
+  operator: 'bg-slate-100 text-slate-600 border border-slate-200',
 }
 
 export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const pathname = usePathname()
   const { user, logout } = useAuth()
   const router = useRouter()
+  const { t: tn } = useTranslation('nav')
+  const { t: th } = useTranslation('header')
 
-  const meta = PAGE_META[pathname] ?? { title: 'SimpleWMS' }
+  const meta = PAGE_KEYS[pathname]
+  const pageTitle  = meta ? tn(meta.titleKey.replace('nav.', '') as Parameters<typeof tn>[0]) : 'SimpleWMS'
+  const pageParent = meta?.parentKey
+    ? tn(meta.parentKey.replace('nav.', '') as Parameters<typeof tn>[0])
+    : undefined
+
+  const roleLabel = user ? (
+    user.role === 'admin'    ? th('roleAdmin')    :
+    user.role === 'manager'  ? th('roleManager')  :
+    user.role === 'operator' ? th('roleOperator') : null
+  ) : null
 
   const handleLogout = () => {
     logout()
@@ -42,21 +56,24 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
         <button
           onClick={onMenuClick}
           className="md:hidden p-2.5 rounded-md text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0"
-          aria-label="メニューを開く"
+          aria-label={th('menuOpen')}
         >
           <Menu size={18} />
         </button>
 
         {/* パンくず + ページタイトル */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {meta.parent && (
+          {pageParent && (
             <>
-              <span className="text-xs text-slate-400 whitespace-nowrap">{meta.parent}</span>
+              <span className="text-xs text-slate-400 whitespace-nowrap">{pageParent}</span>
               <ChevronRight size={12} className="text-slate-300 flex-shrink-0" />
             </>
           )}
-          <h1 className="text-sm font-semibold text-slate-800 truncate">{meta.title}</h1>
+          <h1 className="text-sm font-semibold text-slate-800 truncate">{pageTitle}</h1>
         </div>
+
+        {/* 言語切替 */}
+        <LanguageSwitcher />
 
         {/* ユーザー情報 */}
         {user && (
@@ -71,14 +88,11 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
               <div className="hidden sm:block">
                 <p className="text-xs font-medium text-slate-700 leading-none">{user.name}</p>
               </div>
-              {(() => {
-                const role = ROLE_CONFIG[user.role]
-                return role ? (
-                  <span className={`hidden sm:inline px-2 py-0.5 text-[10px] font-semibold rounded ${role.style}`}>
-                    {role.label}
-                  </span>
-                ) : null
-              })()}
+              {roleLabel && (
+                <span className={`hidden sm:inline px-2 py-0.5 text-[10px] font-semibold rounded ${ROLE_STYLE[user.role] ?? ''}`}>
+                  {roleLabel}
+                </span>
+              )}
             </div>
 
             <div className="w-px h-4 bg-slate-200" />
@@ -89,7 +103,7 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
                          hover:text-red-600 hover:bg-red-50 rounded transition-colors"
             >
               <LogOut size={12} />
-              <span className="hidden sm:inline">ログアウト</span>
+              <span className="hidden sm:inline">{th('logout')}</span>
             </button>
           </div>
         )}

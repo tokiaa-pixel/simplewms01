@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useTranslation } from '@/lib/i18n'
 import {
   LayoutDashboard,
   ClipboardList,
@@ -14,55 +15,10 @@ import {
   Package,
 } from 'lucide-react'
 
-interface NavItem {
-  href: string
-  label: string
-  icon: React.ComponentType<{ size?: number; className?: string }>
-}
-
-interface NavGroup {
-  label?: string
-  items: NavItem[]
-}
-
 interface SidebarProps {
   isOpen: boolean
   onClose: () => void
 }
-
-const navGroups: NavGroup[] = [
-  {
-    items: [
-      { href: '/dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
-    ],
-  },
-  {
-    label: '入荷・入庫',
-    items: [
-      { href: '/arrival',   label: '入荷予定登録', icon: ClipboardList },
-      { href: '/receiving', label: '入庫処理',     icon: PackageCheck },
-    ],
-  },
-  {
-    label: '在庫',
-    items: [
-      { href: '/inventory', label: '在庫一覧', icon: Boxes },
-    ],
-  },
-  {
-    label: '出庫',
-    items: [
-      { href: '/shipping',       label: '出庫処理メニュー', icon: Truck },
-      { href: '/shipping/input', label: '出庫入力',         icon: PackageMinus },
-    ],
-  },
-  {
-    label: '設定',
-    items: [
-      { href: '/master', label: 'マスタ管理', icon: Settings },
-    ],
-  },
-]
 
 function isActive(pathname: string, href: string): boolean {
   if (pathname === href) return true
@@ -72,12 +28,48 @@ function isActive(pathname: string, href: string): boolean {
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
+  const { t } = useTranslation('nav')
 
   // ルート変遷時にモバイルメニューを閉じる
   useEffect(() => {
     onClose()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname])
+
+  // ナビグループ定義（翻訳キーを使用）
+  const navGroups = [
+    {
+      items: [
+        { href: '/dashboard', label: t('dashboard'), icon: LayoutDashboard },
+      ],
+    },
+    {
+      label: t('groupInbound'),
+      items: [
+        { href: '/arrival',   label: t('arrival'),   icon: ClipboardList },
+        { href: '/receiving', label: t('receiving'), icon: PackageCheck },
+      ],
+    },
+    {
+      label: t('groupInventory'),
+      items: [
+        { href: '/inventory', label: t('inventory'), icon: Boxes },
+      ],
+    },
+    {
+      label: t('groupOutbound'),
+      items: [
+        { href: '/shipping',       label: t('shipping'),      icon: Truck },
+        { href: '/shipping/input', label: t('shippingInput'), icon: PackageMinus },
+      ],
+    },
+    {
+      label: t('groupSettings'),
+      items: [
+        { href: '/master', label: t('master'), icon: Settings },
+      ],
+    },
+  ]
 
   return (
     <>
@@ -119,7 +111,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               SimpleWMS
             </p>
             <p className="text-[10px] leading-tight truncate" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              在庫管理システム
+              WMS
             </p>
           </div>
         </div>
@@ -146,14 +138,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         className="flex items-center gap-2.5 px-3 py-2.5 rounded text-sm transition-all"
                         style={
                           active
-                            ? {
-                                backgroundColor: '#00A0C8',
-                                color: '#ffffff',
-                                fontWeight: 600,
-                              }
-                            : {
-                                color: 'rgba(255,255,255,0.6)',
-                              }
+                            ? { backgroundColor: '#00A0C8', color: '#ffffff', fontWeight: 600 }
+                            : { color: 'rgba(255,255,255,0.6)' }
                         }
                         onMouseEnter={(e) => {
                           if (!active)
@@ -167,7 +153,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         }}
                       >
                         <span style={{ opacity: active ? 1 : 0.7 }} className="flex-shrink-0 flex items-center">
-                          <item.icon size={14} className="" />
+                          <item.icon size={14} />
                         </span>
                         <span className="truncate text-[13px]">{item.label}</span>
                         {active && (

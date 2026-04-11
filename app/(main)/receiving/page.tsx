@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { PackageCheck, CheckCircle } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import { useWms } from '@/store/WmsContext'
+import { useTranslation } from '@/lib/i18n'
 import {
   type ArrivalSchedule,
   type ArrivalStatus,
@@ -13,18 +14,19 @@ import {
 // ─── ユーティリティ ────────────────────────────────────────────
 
 function calcProgress(schedule: ArrivalSchedule) {
-  const total = schedule.items.reduce((s, i) => s + i.scheduledQuantity, 0)
-  const received = schedule.items.reduce((s, i) => s + i.receivedQuantity, 0)
+  const total    = schedule.items.reduce((s, i) => s + i.scheduledQuantity, 0)
+  const received = schedule.items.reduce((s, i) => s + i.receivedQuantity,  0)
   return { total, received, pct: total > 0 ? (received / total) * 100 : 0 }
 }
 
 // ─── ステータスバッジ ──────────────────────────────────────────
 
 function ArrivalStatusBadge({ status }: { status: ArrivalStatus }) {
+  const { t } = useTranslation('status')
   const cfg = ARRIVAL_STATUS_CONFIG[status]
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}>
-      {cfg.label}
+      {t(`arrival_${status}` as Parameters<typeof t>[0])}
     </span>
   )
 }
@@ -43,11 +45,8 @@ function ProgressBar({
   status: ArrivalStatus
 }) {
   const barColor =
-    status === 'completed'
-      ? 'bg-green-400'
-      : status === 'partial'
-      ? 'bg-amber-400'
-      : 'bg-slate-200'
+    status === 'completed' ? 'bg-green-400' :
+    status === 'partial'   ? 'bg-amber-400' : 'bg-slate-200'
 
   return (
     <div className="flex items-center gap-2">
@@ -74,8 +73,9 @@ function ReceivingModal({
   onClose: () => void
 }) {
   const { confirmReceiving } = useWms()
+  const { t } = useTranslation('receiving')
+  const { t: tc } = useTranslation('common')
 
-  // 今回入庫数量の入力値 (itemId → 入力文字列)
   const [inputQty, setInputQty] = useState<Record<string, string>>(() =>
     Object.fromEntries(schedule.items.map((i) => [i.id, '']))
   )
@@ -96,18 +96,15 @@ function ReceivingModal({
       .filter((r) => r.qty > 0)
 
     if (results.length === 0) {
-      setError('1件以上の入庫数量を入力してください')
+      setError(t('errNoQty'))
       return
     }
 
-    // 上限チェック
     for (const item of schedule.items) {
       const qty = parseInt(inputQty[item.id] ?? '0') || 0
       const remaining = item.scheduledQuantity - item.receivedQuantity
       if (qty > remaining) {
-        setError(
-          `${item.productName}の入庫数量が残り数量（${remaining}）を超えています`
-        )
+        setError(`${item.productName}: ${t('errOverflow')} (${remaining})`)
         return
       }
     }
@@ -116,19 +113,18 @@ function ReceivingModal({
     setConfirmed(true)
   }
 
-  // 入庫確定後の完了表示
   if (confirmed) {
     return (
-      <Modal title={`入庫処理 - ${schedule.code}`} onClose={onClose} size="md">
+      <Modal title={`${t('modalTitle')} - ${schedule.code}`} onClose={onClose} size="md">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle size={40} className="text-green-500" />
-          <p className="text-sm font-semibold text-slate-700">入庫処理が完了しました</p>
-          <p className="text-xs text-slate-500">{schedule.code} の入庫を確定しました</p>
+          <p className="text-sm font-semibold text-slate-700">{t('confirmBtn')} ✓</p>
+          <p className="text-xs text-slate-500">{schedule.code}</p>
           <button
             onClick={onClose}
             className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
           >
-            閉じる
+            {tc('close')}
           </button>
         </div>
       </Modal>
@@ -136,18 +132,18 @@ function ReceivingModal({
   }
 
   return (
-    <Modal title={`入庫処理 - ${schedule.code}`} onClose={onClose} size="lg">
+    <Modal title={`${t('modalTitle')} - ${schedule.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* スケジュール情報 */}
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
           {[
-            ['仕入先', schedule.supplierName],
-            ['ステータス', <ArrivalStatusBadge status={schedule.status} />],
-            ['入荷予定日', schedule.scheduledDate],
-            ['入庫進捗', `${received} / ${total} 個`],
+            [t('detailSupplier'), schedule.supplierName],
+            [t('detailStatus'),   <ArrivalStatusBadge status={schedule.status} />],
+            [t('detailDate'),     schedule.scheduledDate],
+            [t('detailProgress'), `${received} / ${total} ${tc('pieces')}`],
           ].map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
-              <dt className="text-xs text-slate-500 w-20 flex-shrink-0">{label}</dt>
+              <dt className="text-xs text-slate-500 w-20 flex-shrink-0">{label as string}</dt>
               <dd className="text-xs text-slate-800 font-medium">
                 {value as React.ReactNode}
               </dd>
@@ -166,15 +162,15 @@ function ReceivingModal({
           <table className="w-full text-xs min-w-[480px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品コード</th>
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品名</th>
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">保管場所</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">予定数量</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">入庫済み</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">残り</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblLocation')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblScheduled')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblReceived')}</th>
+                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblRemaining')}</th>
                 {!isReadOnly && (
                   <th className="px-4 py-2.5 text-right font-medium text-slate-500 whitespace-nowrap">
-                    今回入庫数量
+                    {t('tblThisReceiving')}
                   </th>
                 )}
               </tr>
@@ -184,10 +180,7 @@ function ReceivingModal({
                 const remaining = item.scheduledQuantity - item.receivedQuantity
                 const isDone = remaining === 0
                 return (
-                  <tr
-                    key={item.id}
-                    className={isDone ? 'bg-green-50/30 opacity-70' : ''}
-                  >
+                  <tr key={item.id} className={isDone ? 'bg-green-50/30 opacity-70' : ''}>
                     <td className="px-4 py-3 font-mono text-blue-600">{item.productCode}</td>
                     <td className="px-4 py-3 text-slate-700">{item.productName}</td>
                     <td className="px-4 py-3 font-mono text-slate-600">{item.locationCode}</td>
@@ -198,12 +191,12 @@ function ReceivingModal({
                     <td className={`px-4 py-3 text-right tabular-nums font-medium ${
                       isDone ? 'text-green-600' : 'text-amber-600'
                     }`}>
-                      {isDone ? '完了' : remaining}
+                      {isDone ? '✓' : remaining}
                     </td>
                     {!isReadOnly && (
                       <td className="px-4 py-3 text-right">
                         {isDone ? (
-                          <span className="text-green-500 text-xs">入庫済み</span>
+                          <span className="text-green-500 text-xs">{t('qtyDone')}</span>
                         ) : (
                           <input
                             type="number"
@@ -211,10 +204,7 @@ function ReceivingModal({
                             max={remaining}
                             value={inputQty[item.id] ?? ''}
                             onChange={(e) => {
-                              setInputQty((prev) => ({
-                                ...prev,
-                                [item.id]: e.target.value,
-                              }))
+                              setInputQty((prev) => ({ ...prev, [item.id]: e.target.value }))
                               setError('')
                             }}
                             placeholder="0"
@@ -243,7 +233,7 @@ function ReceivingModal({
             onClick={onClose}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
-            {isReadOnly ? '閉じる' : 'キャンセル'}
+            {isReadOnly ? tc('close') : tc('cancel')}
           </button>
           {!isReadOnly && (
             <button
@@ -251,7 +241,7 @@ function ReceivingModal({
               className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium flex items-center justify-center gap-2"
             >
               <PackageCheck size={15} />
-              入庫確定
+              {t('confirmBtn')}
             </button>
           )}
         </div>
@@ -260,43 +250,36 @@ function ReceivingModal({
   )
 }
 
-// ─── フィルタ設定 ─────────────────────────────────────────────
-
-const STATUS_FILTER_OPTIONS: { value: ArrivalStatus | 'all' | 'active'; label: string }[] = [
-  { value: 'all', label: 'すべて' },
-  { value: 'active', label: '処理対象（未着荷・一部入庫）' },
-  { value: 'pending', label: '未着荷' },
-  { value: 'partial', label: '一部入庫' },
-  { value: 'completed', label: '入庫完了' },
-]
-
 // ─── メインページ ─────────────────────────────────────────────
 
 export default function ReceivingPage() {
   const { state } = useWms()
-  const [statusFilter, setStatusFilter] = useState<
-    ArrivalStatus | 'all' | 'active'
-  >('active')
-  const [selectedSchedule, setSelectedSchedule] =
-    useState<ArrivalSchedule | null>(null)
+  const { t } = useTranslation('receiving')
+  const { t: tc } = useTranslation('common')
+  const { t: ts } = useTranslation('status')
+
+  const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'all' | 'active'>('active')
+  const [selectedSchedule, setSelectedSchedule] = useState<ArrivalSchedule | null>(null)
+
+  const statusFilterOptions = [
+    { value: 'all' as const,       label: t('filterAll') },
+    { value: 'active' as const,    label: t('filterActive') },
+    { value: 'pending' as const,   label: ts('arrival_pending') },
+    { value: 'partial' as const,   label: ts('arrival_partial') },
+    { value: 'completed' as const, label: ts('arrival_completed') },
+  ]
 
   const filtered = useMemo(() => {
     return state.arrivalSchedules.filter((s) => {
       if (statusFilter === 'all') return true
-      if (statusFilter === 'active')
-        return s.status === 'pending' || s.status === 'partial'
+      if (statusFilter === 'active') return s.status === 'pending' || s.status === 'partial'
       return s.status === statusFilter
     })
   }, [state.arrivalSchedules, statusFilter])
 
-  // ステータスごとの件数（バッジ表示用）
   const counts = useMemo(() => {
-    const pending = state.arrivalSchedules.filter(
-      (s) => s.status === 'pending'
-    ).length
-    const partial = state.arrivalSchedules.filter(
-      (s) => s.status === 'partial'
-    ).length
+    const pending = state.arrivalSchedules.filter((s) => s.status === 'pending').length
+    const partial = state.arrivalSchedules.filter((s) => s.status === 'partial').length
     return { pending, partial }
   }, [state.arrivalSchedules])
 
@@ -305,10 +288,8 @@ export default function ReceivingPage() {
       {/* ページヘッダー */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">入庫処理</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            入荷予定に基づき、実際の入庫数量を記録・確定します
-          </p>
+          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
         </div>
 
         {/* 対応件数サマリ */}
@@ -317,7 +298,7 @@ export default function ReceivingPage() {
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 rounded-lg">
               <span className="w-2 h-2 rounded-full bg-slate-500" />
               <span className="text-xs text-slate-600">
-                未着荷: <strong>{counts.pending}</strong>件
+                {ts('arrival_pending')}: <strong>{counts.pending}</strong>{tc('countUnit')}
               </span>
             </div>
           )}
@@ -325,7 +306,7 @@ export default function ReceivingPage() {
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 rounded-lg">
               <span className="w-2 h-2 rounded-full bg-amber-500" />
               <span className="text-xs text-amber-700">
-                一部入庫: <strong>{counts.partial}</strong>件
+                {ts('arrival_partial')}: <strong>{counts.partial}</strong>{tc('countUnit')}
               </span>
             </div>
           )}
@@ -338,19 +319,15 @@ export default function ReceivingPage() {
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3">
           <select
             value={statusFilter}
-            onChange={(e) =>
-              setStatusFilter(e.target.value as typeof statusFilter)
-            }
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
             className="px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white text-slate-700"
           >
-            {STATUS_FILTER_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
+            {statusFilterOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
           <span className="text-xs text-slate-500 ml-auto">
-            全 <strong className="text-slate-700">{filtered.length}</strong> 件
+            {tc('total')} <strong className="text-slate-700">{filtered.length}</strong> {tc('countUnit')}
           </span>
         </div>
 
@@ -359,7 +336,7 @@ export default function ReceivingPage() {
           {filtered.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
               <PackageCheck size={28} />
-              <p className="text-sm">入庫待ちの入荷予定がありません</p>
+              <p className="text-sm">{t('empty')}</p>
             </div>
           ) : (
             filtered.map((schedule) => {
@@ -391,24 +368,12 @@ export default function ReceivingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
-                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  入荷予定番号
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                  仕入先
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  入荷予定日
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  品目数
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  入庫進捗
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  ステータス
-                </th>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colCode')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">{t('colSupplier')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colDate')}</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">{tc('itemUnit')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colProgress')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colStatus')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -417,10 +382,7 @@ export default function ReceivingPage() {
                   <td colSpan={6} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <PackageCheck size={28} />
-                      <p className="text-sm">入庫待ちの入荷予定がありません</p>
-                      <p className="text-xs">
-                        すべての入荷予定が入庫完了しています
-                      </p>
+                      <p className="text-sm">{t('empty')}</p>
                     </div>
                   </td>
                 </tr>
@@ -433,25 +395,17 @@ export default function ReceivingPage() {
                       key={schedule.id}
                       onClick={() => setSelectedSchedule(schedule)}
                       className={`cursor-pointer transition-colors ${
-                        isCompleted
-                          ? 'hover:bg-slate-50/50 opacity-60'
-                          : 'hover:bg-blue-50/50'
+                        isCompleted ? 'hover:bg-slate-50/50 opacity-60' : 'hover:bg-blue-50/50'
                       }`}
                     >
                       <td className="px-5 py-3 whitespace-nowrap">
-                        <span className="font-mono text-xs text-blue-600 font-medium">
-                          {schedule.code}
-                        </span>
+                        <span className="font-mono text-xs text-blue-600 font-medium">{schedule.code}</span>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {schedule.supplierName}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">
-                        {schedule.scheduledDate}
-                      </td>
+                      <td className="px-4 py-3 text-slate-700">{schedule.supplierName}</td>
+                      <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">{schedule.scheduledDate}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-700">
                         {schedule.items.length}
-                        <span className="text-xs text-slate-400 ml-1">品目</span>
+                        <span className="text-xs text-slate-400 ml-1">{tc('itemUnit')}</span>
                       </td>
                       <td className="px-4 py-3">
                         <ProgressBar {...progress} status={schedule.status} />

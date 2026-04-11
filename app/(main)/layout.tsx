@@ -25,7 +25,7 @@ export default function MainLayout({
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
-        <span className="text-slate-400 text-sm">読み込み中...</span>
+        <span className="text-slate-400 text-sm">Loading...</span>
       </div>
     )
   }

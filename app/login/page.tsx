@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/store/AuthContext'
+import { useTranslation } from '@/lib/i18n'
+import LanguageSwitcher from '@/components/layout/LanguageSwitcher'
 import { AlertCircle, Package } from 'lucide-react'
 
 export default function LoginPage() {
@@ -13,6 +15,7 @@ export default function LoginPage() {
 
   const { user, isLoading, login } = useAuth()
   const router = useRouter()
+  const { t } = useTranslation('login')
 
   useEffect(() => {
     if (!isLoading && user) router.replace('/dashboard')
@@ -26,7 +29,7 @@ export default function LoginPage() {
     if (ok) {
       router.replace('/dashboard')
     } else {
-      setError('メールアドレスまたはパスワードが正しくありません')
+      setError(t('error'))
       setSubmitting(false)
     }
   }
@@ -55,19 +58,18 @@ export default function LoginPage() {
             <div>
               <p className="text-white font-bold text-base leading-tight">SimpleWMS</p>
               <p className="text-[11px] leading-tight" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                在庫管理システム
+                {t('brandSubtitle')}
               </p>
             </div>
           </div>
 
           {/* キャッチコピー */}
           <h2 className="text-2xl font-bold text-white leading-snug mb-4">
-            倉庫業務を、<br />
-            シンプルに。
+            {t('catchcopy1')}<br />
+            {t('catchcopy2')}
           </h2>
-          <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            入荷・入庫から在庫管理、出庫まで<br />
-            一元管理できる業務システムです。
+          <p className="text-sm leading-relaxed whitespace-pre-line" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            {t('description')}
           </p>
         </div>
 
@@ -75,7 +77,7 @@ export default function LoginPage() {
         <div>
           <div className="h-px w-16 mb-4" style={{ backgroundColor: '#00A0C8' }} />
           <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            © 2024 SimpleWMS. All rights reserved.
+            {t('copyright')}
           </p>
         </div>
       </div>
@@ -95,9 +97,12 @@ export default function LoginPage() {
             <p className="font-bold text-slate-800 text-sm">SimpleWMS</p>
           </div>
 
-          <div className="mb-8">
-            <h1 className="text-xl font-bold text-slate-800">ログイン</h1>
-            <p className="text-sm text-slate-500 mt-1">アカウント情報を入力してください</p>
+          <div className="mb-8 flex items-start justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-slate-800">{t('title')}</h1>
+              <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
+            </div>
+            <LanguageSwitcher />
           </div>
 
           {/* フォームカード */}
@@ -106,7 +111,7 @@ export default function LoginPage() {
               {/* メールアドレス */}
               <div>
                 <label htmlFor="email" className="wms-label">
-                  メールアドレス
+                  {t('email')}
                 </label>
                 <input
                   id="email"
@@ -122,7 +127,7 @@ export default function LoginPage() {
               {/* パスワード */}
               <div>
                 <label htmlFor="password" className="wms-label">
-                  パスワード
+                  {t('password')}
                 </label>
                 <input
                   id="password"
@@ -161,7 +166,7 @@ export default function LoginPage() {
                     (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#002B5C'
                 }}
               >
-                {submitting ? 'ログイン中...' : 'ログイン'}
+                {submitting ? t('submitting') : t('submit')}
               </button>
             </form>
           </div>
@@ -169,12 +174,12 @@ export default function LoginPage() {
           {/* テスト用アカウント */}
           <div className="mt-5 bg-white border border-slate-200 rounded-lg p-4 shadow-card">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-3">
-              テスト用アカウント
+              {t('testAccounts')}
             </p>
             <div className="space-y-2">
               {[
-                { role: '管理者', email: 'admin@wms.local',    pw: 'password123' },
-                { role: '担当者', email: 'operator@wms.local', pw: 'password123' },
+                { roleKey: 'roleAdmin' as const,    email: 'admin@wms.local',    pw: 'password123' },
+                { roleKey: 'roleOperator' as const, email: 'operator@wms.local', pw: 'password123' },
               ].map((a) => (
                 <button
                   key={a.email}
@@ -184,17 +189,17 @@ export default function LoginPage() {
                              hover:border-brand-teal hover:bg-brand-light transition-colors text-left"
                 >
                   <span
-                    className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                    className="text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
                     style={{ backgroundColor: '#E6F3F9', color: '#005B99' }}
                   >
-                    {a.role}
+                    {t(a.roleKey)}
                   </span>
                   <span className="text-xs text-slate-600 font-mono">{a.email}</span>
                 </button>
               ))}
             </div>
             <p className="text-[10px] text-slate-400 mt-2.5">
-              ※ クリックするとフォームに自動入力されます
+              {t('testAccountsNote')}
             </p>
           </div>
         </div>

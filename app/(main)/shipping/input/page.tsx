@@ -6,6 +6,7 @@ import { Plus, Trash2, ArrowLeft, CheckCircle } from 'lucide-react'
 import { useWms } from '@/store/WmsContext'
 import type { ShippingOrder, ShippingOrderItem } from '@/lib/types'
 import { todayIso, toDisplayDate } from '@/lib/utils'
+import { useTranslation } from '@/lib/i18n'
 
 function generateCode(orders: ShippingOrder[]): string {
   const year = new Date().getFullYear()
@@ -31,6 +32,8 @@ function emptyRow(uid: string): FormItemRow {
 // ─── ページ ──────────────────────────────────────────────────
 
 export default function ShippingInputPage() {
+  const { t } = useTranslation('shippingInput')
+  const { t: tc } = useTranslation('common')
   const { addShipping, state } = useWms()
   const { customers, masterProducts } = state
   const router = useRouter()
@@ -44,22 +47,21 @@ export default function ShippingInputPage() {
   const [submitted, setSubmitted] = useState(false)
   const [newCode, setNewCode] = useState('')
 
-  // バリデーション
   const validate = (): boolean => {
     const errs: FormErrors = {}
-    if (!customerId) errs.customerId = '出荷先を選択してください'
-    if (!requestedDate) errs.requestedDate = '出庫予定日を入力してください'
+    if (!customerId) errs.customerId = t('errCustomer')
+    if (!requestedDate) errs.requestedDate = t('errDate')
 
     const validRows = rows.filter((r) => r.productCode)
-    if (validRows.length === 0) errs.items = '商品を1件以上追加してください'
+    if (validRows.length === 0) errs.items = t('errItems')
 
     validRows.forEach((r) => {
       const qty = Number(r.orderedQuantity)
       if (!r.orderedQuantity || isNaN(qty) || qty <= 0) {
-        errs[`qty_${r.uid}`] = '1以上の数量を入力してください'
+        errs[`qty_${r.uid}`] = t('errQty')
       }
       if (!r.locationCode.trim()) {
-        errs[`loc_${r.uid}`] = '出庫元ロケーションを入力してください'
+        errs[`loc_${r.uid}`] = t('errLocation')
       }
     })
 
@@ -124,15 +126,13 @@ export default function ShippingInputPage() {
         <div className="bg-white rounded-lg border border-slate-200 p-12 flex flex-col items-center gap-4 text-center">
           <CheckCircle size={48} className="text-green-500" />
           <h3 className="text-base font-semibold text-slate-800">
-            出庫指示を登録しました
+            {t('successTitle')}
           </h3>
           <p className="text-sm text-slate-500">
-            出庫指示番号:{' '}
+            {t('successSubtitle')}{' '}
             <span className="font-mono font-bold text-slate-700">{newCode}</span>
           </p>
-          <p className="text-xs text-slate-400">
-            出庫処理メニューからピッキング処理を開始してください
-          </p>
+          <p className="text-xs text-slate-400">{t('successNote')}</p>
           <div className="flex flex-col sm:flex-row gap-3 mt-3 w-full sm:w-auto">
             <button
               onClick={() => {
@@ -145,13 +145,13 @@ export default function ShippingInputPage() {
               }}
               className="px-4 py-2.5 text-sm border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
             >
-              続けて登録
+              {t('continueBtn')}
             </button>
             <button
               onClick={() => router.push('/shipping')}
               className="px-4 py-2.5 text-sm bg-brand-navy text-white rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
             >
-              出庫処理メニューへ
+              {t('toMenuBtn')}
             </button>
           </div>
         </div>
@@ -172,10 +172,8 @@ export default function ShippingInputPage() {
           <ArrowLeft size={16} />
         </button>
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">出庫入力</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            得意先への出荷指示を新規登録します
-          </p>
+          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
+          <p className="text-sm text-slate-500 mt-0.5">{t('subtitle')}</p>
         </div>
       </div>
 
@@ -184,7 +182,7 @@ export default function ShippingInputPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
-              出荷先 <span className="text-red-500">*</span>
+              {t('customer')} <span className="text-red-500">*</span>
             </label>
             <select
               value={customerId}
@@ -194,7 +192,7 @@ export default function ShippingInputPage() {
               }}
               className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white"
             >
-              <option value="">出荷先を選択...</option>
+              <option value="">{t('customerPlaceholder')}</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -208,7 +206,7 @@ export default function ShippingInputPage() {
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
-              出庫予定日 <span className="text-red-500">*</span>
+              {t('requestedDate')} <span className="text-red-500">*</span>
             </label>
             <input
               type="date"
@@ -229,7 +227,7 @@ export default function ShippingInputPage() {
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-medium text-slate-600">
-              商品明細 <span className="text-red-500">*</span>
+              {t('itemsLabel')} <span className="text-red-500">*</span>
             </label>
             {errors.items && (
               <p className="text-xs text-red-500">{errors.items}</p>
@@ -240,9 +238,9 @@ export default function ShippingInputPage() {
             <div className="min-w-[460px]">
             {/* テーブルヘッダー */}
             <div className="grid grid-cols-[1fr_110px_130px_32px] bg-slate-50 border-b border-slate-200 px-3 py-2 gap-0">
-              <span className="text-xs font-medium text-slate-500">商品</span>
-              <span className="text-xs font-medium text-slate-500 text-right pr-2">出庫数量</span>
-              <span className="text-xs font-medium text-slate-500 pl-2">出庫元ロケーション</span>
+              <span className="text-xs font-medium text-slate-500">{t('product')}</span>
+              <span className="text-xs font-medium text-slate-500 text-right pr-2">{t('qtyLabel')}</span>
+              <span className="text-xs font-medium text-slate-500 pl-2">{t('locationLabel')}</span>
               <span />
             </div>
 
@@ -266,7 +264,7 @@ export default function ShippingInputPage() {
                         }
                         className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white"
                       >
-                        <option value="">商品を選択...</option>
+                        <option value="">{t('productPlaceholder')}</option>
                         {masterProducts.map((p) => (
                           <option key={p.code} value={p.code}>
                             {p.code} - {p.name}
@@ -275,7 +273,9 @@ export default function ShippingInputPage() {
                       </select>
                       {product && (
                         <p className="text-[10px] text-slate-400 pl-1">
-                          単位: {product.unit} / {product.category}
+                          {t('productHint')
+                            .replace('{unit}', product.unit)
+                            .replace('{category}', product.category)}
                         </p>
                       )}
                     </div>
@@ -314,7 +314,7 @@ export default function ShippingInputPage() {
                         onChange={(e) =>
                           updateRow(row.uid, 'locationCode', e.target.value)
                         }
-                        placeholder="A-01-01"
+                        placeholder={t('locationPlaceholder')}
                         className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal"
                       />
                       {errors[`loc_${row.uid}`] && (
@@ -330,7 +330,7 @@ export default function ShippingInputPage() {
                         onClick={() => removeRow(row.uid)}
                         disabled={rows.length === 1}
                         className="p-1 text-slate-300 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                        aria-label="行を削除"
+                        aria-label="remove row"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -347,7 +347,7 @@ export default function ShippingInputPage() {
                 className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium"
               >
                 <Plus size={13} />
-                商品を追加
+                {tc('addProduct')}
               </button>
             </div>
             </div>{/* min-w end */}
@@ -357,13 +357,13 @@ export default function ShippingInputPage() {
         {/* 備考 */}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1.5">
-            備考
+            {tc('note')}
           </label>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}
-            placeholder="梱包方法・配送上の注意事項など"
+            placeholder={t('notePlaceholder')}
             className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal resize-none"
           />
         </div>
@@ -374,13 +374,13 @@ export default function ShippingInputPage() {
             onClick={() => router.push('/shipping')}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
-            キャンセル
+            {tc('cancel')}
           </button>
           <button
             onClick={handleSubmit}
             className="w-full sm:w-auto px-5 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
           >
-            出庫指示を登録
+            {t('submitBtn')}
           </button>
         </div>
       </div>
