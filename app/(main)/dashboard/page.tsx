@@ -132,30 +132,30 @@ function KpiCard(stat: typeof kpiStats[number]) {
       {/* 上部アクセントライン */}
       <div className="h-1" style={{ backgroundColor: stat.accentColor }} />
 
-      <div className="p-5">
-        <div className="flex items-start justify-between mb-4">
-          <p className="text-xs font-medium text-slate-500 leading-snug pr-2">{stat.label}</p>
+      <div className="p-4 sm:p-5">
+        {/* モバイル: アイコンと数値を横並び */}
+        <div className="flex items-center gap-3 sm:block">
           <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+            className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center flex-shrink-0 sm:mb-3"
             style={{ backgroundColor: stat.bgColor }}
           >
-            <stat.icon size={17} style={{ color: stat.iconColor }} />
+            <stat.icon size={18} style={{ color: stat.iconColor }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-slate-500 leading-snug mb-1 sm:mb-4 truncate">{stat.label}</p>
+            <p className="text-2xl sm:text-3xl font-bold tabular-nums" style={{ color: '#0F172A' }}>
+              {stat.value}
+              <span className="text-xs sm:text-sm font-normal text-slate-400 ml-1">{stat.unit}</span>
+            </p>
           </div>
         </div>
 
-        <div className="flex items-end justify-between">
-          <p className="text-3xl font-bold tabular-nums" style={{ color: '#0F172A' }}>
-            {stat.value}
-            <span className="text-sm font-normal text-slate-400 ml-1">{stat.unit}</span>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1 mt-3">
+        <div className="flex items-center gap-1 mt-2 sm:mt-3">
           <TrendIcon size={12} style={{ color: trendColor }} />
           <span className="text-xs font-medium" style={{ color: trendColor }}>
             {stat.trend}
           </span>
-          <span className="text-xs text-slate-400">{stat.trendLabel}</span>
+          <span className="text-xs text-slate-400 truncate">{stat.trendLabel}</span>
         </div>
       </div>
     </div>
@@ -203,13 +203,13 @@ export default function DashboardPage() {
     <div className="space-y-6 max-w-screen-xl">
 
       {/* 日付バー */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-bold text-slate-800">ダッシュボード</h2>
-          <p className="text-xs text-slate-400 mt-0.5">{dateStr}</p>
+          <p className="text-xs text-slate-400 mt-0.5 hidden sm:block">{dateStr}</p>
         </div>
         <div
-          className="px-3 py-1.5 rounded text-xs font-medium"
+          className="px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap"
           style={{ backgroundColor: '#E6F3F9', color: '#005B99' }}
         >
           本日の業務状況
@@ -217,7 +217,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI カード 4枚 */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {kpiStats.map((stat) => (
           <KpiCard key={stat.label} {...stat} />
         ))}
@@ -228,7 +228,21 @@ export default function DashboardPage() {
 
         {/* 最近の入庫 */}
         <TableCard title="最近の入庫" href="/receiving">
-          <table className="w-full">
+          {/* モバイル：カード表示 */}
+          <div className="sm:hidden divide-y divide-slate-100">
+            {recentReceivings.map((r) => (
+              <div key={r.code} className="px-4 py-3.5">
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <span className="font-mono text-xs font-semibold" style={{ color: '#005B99' }}>{r.code}</span>
+                  <Badge label={r.status} styleMap={receivingStatusStyle} />
+                </div>
+                <p className="text-sm font-medium text-slate-700 truncate mb-0.5">{r.supplier}</p>
+                <p className="text-xs text-slate-500">{r.date}</p>
+              </div>
+            ))}
+          </div>
+          {/* デスクトップ：テーブル表示 */}
+          <table className="w-full hidden sm:table">
             <thead>
               <tr style={{ borderBottom: '2px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
                 <th className="px-5 py-2.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">入庫番号</th>
@@ -266,7 +280,21 @@ export default function DashboardPage() {
 
         {/* 未処理の出庫指示 */}
         <TableCard title="未処理の出庫指示" href="/shipping">
-          <table className="w-full">
+          {/* モバイル：カード表示 */}
+          <div className="sm:hidden divide-y divide-slate-100">
+            {pendingShippings.map((s) => (
+              <div key={s.code} className="px-4 py-3.5">
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <span className="font-mono text-xs font-semibold" style={{ color: '#005B99' }}>{s.code}</span>
+                  <Badge label={s.status} styleMap={shippingStatusStyle} />
+                </div>
+                <p className="text-sm font-medium text-slate-700 truncate mb-0.5">{s.customer}</p>
+                <p className="text-xs text-slate-500">{s.date}</p>
+              </div>
+            ))}
+          </div>
+          {/* デスクトップ：テーブル表示 */}
+          <table className="w-full hidden sm:table">
             <thead>
               <tr style={{ borderBottom: '2px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
                 <th className="px-5 py-2.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">出庫番号</th>

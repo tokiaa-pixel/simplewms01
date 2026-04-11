@@ -137,7 +137,7 @@ function ArrivalCreateModal({ onClose }: { onClose: () => void }) {
     <Modal title="入荷予定登録" onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* 仕入先 / 入荷予定日 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
               仕入先 <span className="text-red-500">*</span>
@@ -192,7 +192,8 @@ function ArrivalCreateModal({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          <div className="border border-slate-200 rounded-lg overflow-hidden">
+          <div className="border border-slate-200 rounded-lg overflow-x-auto">
+            <div className="min-w-[440px]">
             {/* テーブルヘッダー */}
             <div className="grid grid-cols-[1fr_100px_120px_32px] gap-0 bg-slate-50 border-b border-slate-200 px-3 py-2">
               <span className="text-xs font-medium text-slate-500">商品</span>
@@ -301,6 +302,7 @@ function ArrivalCreateModal({ onClose }: { onClose: () => void }) {
                 商品を追加
               </button>
             </div>
+            </div>{/* min-w end */}
           </div>
         </div>
 
@@ -319,16 +321,16 @@ function ArrivalCreateModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* フッターボタン */}
-        <div className="flex justify-end gap-3 pt-1 border-t border-slate-100">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
             キャンセル
           </button>
           <button
             onClick={handleSubmit}
-            className="px-4 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
           >
             登録
           </button>
@@ -360,7 +362,7 @@ function ArrivalDetailModal({
     <Modal title={`入荷予定詳細 - ${schedule.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* ヘッダー情報 */}
-        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
           {[
             ['入荷予定番号', <span className="font-mono font-medium">{schedule.code}</span>],
             ['ステータス', <ArrivalStatusBadge status={schedule.status} />],
@@ -383,8 +385,8 @@ function ArrivalDetailModal({
         )}
 
         {/* 明細テーブル */}
-        <div className="border border-slate-200 rounded-lg overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="border border-slate-200 rounded-lg overflow-x-auto">
+          <table className="w-full text-xs min-w-[460px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-2.5 text-left font-medium text-slate-500">商品コード</th>
@@ -501,15 +503,43 @@ export default function ArrivalPage() {
           {/* 新規登録ボタン */}
           <button
             onClick={() => setShowCreateModal(true)}
-            className="ml-auto flex items-center gap-2 px-4 py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
+            className="w-full sm:w-auto sm:ml-auto flex items-center justify-center gap-2 px-4 py-2.5 sm:py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
           >
             <Plus size={15} />
             新規登録
           </button>
         </div>
 
-        {/* テーブル */}
-        <div className="overflow-x-auto">
+        {/* モバイル：カード表示 */}
+        <div className="sm:hidden divide-y divide-slate-100">
+          {filtered.length === 0 ? (
+            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
+              <ClipboardList size={28} />
+              <p className="text-sm">該当する入荷予定がありません</p>
+            </div>
+          ) : (
+            filtered.map((schedule) => (
+              <div
+                key={schedule.id}
+                onClick={() => setDetailSchedule(schedule)}
+                className="px-4 py-4 active:bg-blue-50/70 cursor-pointer"
+              >
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <span className="font-mono text-xs text-blue-600 font-medium">{schedule.code}</span>
+                  <ArrivalStatusBadge status={schedule.status} />
+                </div>
+                <p className="text-sm font-medium text-slate-700 mb-1">{schedule.supplierName}</p>
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>{schedule.scheduledDate}</span>
+                  <span>{schedule.items.length} 品目</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* デスクトップ：テーブル表示 */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">

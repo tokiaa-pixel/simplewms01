@@ -80,7 +80,7 @@ function PickingModal({
     <Modal title={`ピッキングリスト - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* ヘッダー情報 */}
-        <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-x-8 gap-y-1.5">
+        <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
           {[
             ['出庫指示番号', <span className="font-mono font-medium">{order.code}</span>],
             ['出荷先', order.customerName],
@@ -143,16 +143,16 @@ function PickingModal({
         </div>
 
         {/* フッター */}
-        <div className="flex justify-end gap-3 pt-1 border-t border-slate-100">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
             キャンセル
           </button>
           <button
             onClick={handleStart}
-            className="px-4 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium flex items-center justify-center gap-2"
           >
             <ScanLine size={15} />
             ピッキング開始
@@ -223,7 +223,7 @@ function InspectionModal({
     <Modal title={`検品 - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         {/* ヘッダー */}
-        <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-x-8 gap-y-1.5">
+        <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
           {[
             ['出庫指示番号', <span className="font-mono font-medium">{order.code}</span>],
             ['出荷先', order.customerName],
@@ -303,16 +303,16 @@ function InspectionModal({
           </p>
         )}
 
-        <div className="flex justify-end gap-3 pt-1 border-t border-slate-100">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
             キャンセル
           </button>
           <button
             onClick={handleComplete}
-            className="px-4 py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 transition-colors font-medium flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2"
           >
             <CheckCircle size={15} />
             検品完了
@@ -425,16 +425,16 @@ function ConfirmShippingModal({
           />
         </div>
 
-        <div className="flex justify-end gap-3 pt-1 border-t border-slate-100">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
             キャンセル
           </button>
           <button
             onClick={handleConfirm}
-            className="px-4 py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors font-medium flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
           >
             <Truck size={15} />
             出庫確定
@@ -457,7 +457,7 @@ function DetailModal({
   return (
     <Modal title={`出庫詳細 - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
-        <div className="grid grid-cols-2 gap-x-8 gap-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
           {[
             ['出庫指示番号', <span className="font-mono">{order.code}</span>],
             ['ステータス', <ShippingStatusBadge status={order.status} />],
@@ -586,7 +586,7 @@ export default function ShippingMenuPage() {
   return (
     <div className="max-w-screen-xl space-y-5">
       {/* ページヘッダー */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-800">出庫処理メニュー</h2>
           <p className="text-sm text-slate-500 mt-1">
@@ -595,7 +595,7 @@ export default function ShippingMenuPage() {
         </div>
         <Link
           href="/shipping/input"
-          className="flex items-center gap-2 px-4 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
         >
           <PackageMinus size={15} />
           出庫入力
@@ -603,7 +603,7 @@ export default function ShippingMenuPage() {
       </div>
 
       {/* ステータスサマリバー */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           {
             status: 'pending' as ShippingStatus,
@@ -653,7 +653,7 @@ export default function ShippingMenuPage() {
       </div>
 
       {/* 操作メニューカード */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         {/* ピッキング */}
         <button
           onClick={() => handleOperationClick('pending')}
@@ -777,8 +777,53 @@ export default function ShippingMenuPage() {
           })}
         </div>
 
-        {/* テーブル本体 */}
-        <div className="overflow-x-auto">
+        {/* モバイル：カード表示 */}
+        <div className="sm:hidden divide-y divide-slate-100">
+          {filtered.length === 0 ? (
+            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
+              <Truck size={28} />
+              <p className="text-sm">該当する出庫指示がありません</p>
+            </div>
+          ) : (
+            filtered.map((order) => {
+              const modalType = getModalType(order.status)
+              const nextActionLabel = {
+                picking: 'ピッキング開始',
+                inspection: '検品',
+                confirm: '出庫確定',
+                detail: '詳細確認',
+              }[modalType]
+              const nextActionStyle = {
+                picking: 'text-blue-600 bg-blue-50',
+                inspection: 'text-purple-600 bg-purple-50',
+                confirm: 'text-green-600 bg-green-50',
+                detail: 'text-slate-500 bg-slate-100',
+              }[modalType]
+
+              return (
+                <div key={order.id} className="px-4 py-4">
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <span className="font-mono text-xs text-blue-600 font-medium">{order.code}</span>
+                    <ShippingStatusBadge status={order.status} />
+                  </div>
+                  <p className="text-sm font-medium text-slate-700 mb-2">{order.customerName}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">{order.requestedDate} / {order.items.length}品目</span>
+                    <button
+                      onClick={() => setSelectedOrder(order)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${nextActionStyle}`}
+                    >
+                      {nextActionLabel}
+                    </button>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {/* デスクトップ：テーブル表示 */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">

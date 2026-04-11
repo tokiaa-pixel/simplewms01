@@ -92,8 +92,8 @@ function ProductForm({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="col-span-1 sm:col-span-2">
           <label className="block text-xs font-medium text-slate-600 mb-1">
             商品名 <span className="text-red-500">*</span>
           </label>
@@ -129,7 +129,7 @@ function ProductForm({ onClose }: { onClose: () => void }) {
           {errors.unitPrice && <p className="text-xs text-red-500 mt-1">{errors.unitPrice}</p>}
         </div>
 
-        <div className="col-span-2 grid grid-cols-2 gap-4">
+        <div className="col-span-1 sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">最小在庫数</label>
             <input type="number" min="0" value={minStock} onChange={(e) => setMinStock(e.target.value)}
@@ -147,9 +147,9 @@ function ProductForm({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
-        <button onClick={handleSubmit} className="px-4 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2 border-t border-slate-100">
+        <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
+        <button onClick={handleSubmit} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
       </div>
     </div>
   )
@@ -169,11 +169,11 @@ function ProductTab() {
 
   return (
     <>
-      <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3">
+      <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 sm:gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="商品コード・商品名・カテゴリで検索" />
-        <span className="text-xs text-slate-500 ml-auto">全 <strong className="text-slate-700">{filtered.length}</strong> 件</span>
+        <span className="text-xs text-slate-500 sm:ml-auto">全 <strong className="text-slate-700">{filtered.length}</strong> 件</span>
         <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2.5 sm:py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
           <Plus size={14} />新規登録
         </button>
       </div>
@@ -276,7 +276,7 @@ function SupplierForm({ onClose }: { onClose: () => void }) {
         {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">担当者名</label>
           <input type="text" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="例: 山田 太郎"
@@ -301,9 +301,9 @@ function SupplierForm({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
-        <button onClick={handleSubmit} className="px-4 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2 border-t border-slate-100">
+        <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
+        <button onClick={handleSubmit} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
       </div>
     </div>
   )
@@ -323,11 +323,11 @@ function SupplierTab() {
 
   return (
     <>
-      <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3">
+      <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 sm:gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="コード・仕入先名・担当者で検索" />
         <span className="text-xs text-slate-500 ml-auto">全 <strong className="text-slate-700">{filtered.length}</strong> 件</span>
         <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2.5 sm:py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
           <Plus size={14} />新規登録
         </button>
       </div>
@@ -418,7 +418,7 @@ function CustomerForm({ onClose }: { onClose: () => void }) {
         {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">担当者名</label>
           <input type="text" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="例: 佐藤 次郎"
@@ -437,9 +437,9 @@ function CustomerForm({ onClose }: { onClose: () => void }) {
           className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal" />
       </div>
 
-      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
-        <button onClick={handleSubmit} className="px-4 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2 border-t border-slate-100">
+        <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
+        <button onClick={handleSubmit} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
       </div>
     </div>
   )
@@ -459,11 +459,11 @@ function CustomerTab() {
 
   return (
     <>
-      <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3">
+      <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 sm:gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="コード・得意先名・担当者で検索" />
         <span className="text-xs text-slate-500 ml-auto">全 <strong className="text-slate-700">{filtered.length}</strong> 件</span>
         <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2.5 sm:py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
           <Plus size={14} />新規登録
         </button>
       </div>
@@ -560,7 +560,7 @@ function LocationForm({ onClose }: { onClose: () => void }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ゾーン <span className="text-red-500">*</span></label>
           <input type="text" value={zone} onChange={(e) => setZone(e.target.value.toUpperCase())} placeholder="A"
@@ -588,9 +588,9 @@ function LocationForm({ onClose }: { onClose: () => void }) {
           className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal" />
       </div>
 
-      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
-        <button onClick={handleSubmit} className="px-4 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2 border-t border-slate-100">
+        <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">キャンセル</button>
+        <button onClick={handleSubmit} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium">登録</button>
       </div>
     </div>
   )
@@ -616,7 +616,7 @@ function LocationTab() {
 
   return (
     <>
-      <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3">
+      <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 sm:gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="棚番・ゾーン・説明で検索" />
         {/* ゾーン別件数 */}
         <div className="flex items-center gap-2 ml-2">
@@ -628,7 +628,7 @@ function LocationTab() {
         </div>
         <span className="text-xs text-slate-500 ml-auto">全 <strong className="text-slate-700">{filtered.length}</strong> 件</span>
         <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2.5 sm:py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
           <Plus size={14} />新規登録
         </button>
       </div>

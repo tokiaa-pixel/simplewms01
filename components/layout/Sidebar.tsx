@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -22,6 +23,11 @@ interface NavItem {
 interface NavGroup {
   label?: string
   items: NavItem[]
+}
+
+interface SidebarProps {
+  isOpen: boolean
+  onClose: () => void
 }
 
 const navGroups: NavGroup[] = [
@@ -64,106 +70,131 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href + '/')
 }
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
 
+  // ルート変遷時にモバイルメニューを閉じる
+  useEffect(() => {
+    onClose()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
+
   return (
-    <aside
-      className="w-[220px] flex-shrink-0 flex flex-col h-full overflow-hidden"
-      style={{ backgroundColor: '#002B5C' }}
-    >
-      {/* ─── ロゴ ─────────────────────────────────────────── */}
+    <>
+      {/* モバイル用オーバーレイ */}
       <div
-        className="h-14 flex items-center gap-3 px-5 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}
+        className={`
+          fixed inset-0 z-30 bg-slate-900/50
+          transition-opacity duration-200 md:hidden
+          ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
+        `}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* サイドバー本体 */}
+      <aside
+        className={`
+          fixed inset-y-0 left-0 z-40
+          md:static md:inset-auto md:z-auto
+          w-[220px] flex-shrink-0 flex flex-col h-full overflow-hidden
+          transition-transform duration-200 ease-in-out
+          ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
+        style={{ backgroundColor: '#002B5C' }}
       >
-        {/* ティール四角アイコン */}
+        {/* ─── ロゴ ─────────────────────────────────────────── */}
         <div
-          className="w-7 h-7 flex items-center justify-center rounded flex-shrink-0"
-          style={{ backgroundColor: '#00A0C8' }}
+          className="h-14 flex items-center gap-3 px-5 flex-shrink-0"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}
         >
-          <Package size={14} className="text-white" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-white font-bold text-sm leading-tight tracking-wide truncate">
-            SimpleWMS
-          </p>
-          <p className="text-[10px] leading-tight truncate" style={{ color: 'rgba(255,255,255,0.45)' }}>
-            在庫管理システム
-          </p>
-        </div>
-      </div>
-
-      {/* ─── ナビゲーション ───────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto py-2">
-        {navGroups.map((group, gi) => (
-          <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
-            {group.label && (
-              <p
-                className="px-5 pb-1.5 text-[9px] font-bold uppercase tracking-widest"
-                style={{ color: 'rgba(255,255,255,0.35)' }}
-              >
-                {group.label}
-              </p>
-            )}
-            <ul className="space-y-0.5 px-2">
-              {group.items.map((item) => {
-                const active = isActive(pathname, item.href)
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className="flex items-center gap-2.5 px-3 py-2 rounded text-sm transition-all"
-                      style={
-                        active
-                          ? {
-                              backgroundColor: '#00A0C8',
-                              color: '#ffffff',
-                              fontWeight: 600,
-                            }
-                          : {
-                              color: 'rgba(255,255,255,0.6)',
-                            }
-                      }
-                      onMouseEnter={(e) => {
-                        if (!active)
-                          (e.currentTarget as HTMLAnchorElement).style.backgroundColor =
-                            'rgba(255,255,255,0.08)'
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!active)
-                          (e.currentTarget as HTMLAnchorElement).style.backgroundColor =
-                            'transparent'
-                      }}
-                    >
-                      <span style={{ opacity: active ? 1 : 0.7 }} className="flex-shrink-0 flex items-center">
-                        <item.icon size={14} className="" />
-                      </span>
-                      <span className="truncate text-[13px]">{item.label}</span>
-                      {active && (
-                        <span
-                          className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: 'rgba(255,255,255,0.7)' }}
-                        />
-                      )}
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
+          <div
+            className="w-7 h-7 flex items-center justify-center rounded flex-shrink-0"
+            style={{ backgroundColor: '#00A0C8' }}
+          >
+            <Package size={14} className="text-white" />
           </div>
-        ))}
-      </nav>
+          <div className="min-w-0">
+            <p className="text-white font-bold text-sm leading-tight tracking-wide truncate">
+              SimpleWMS
+            </p>
+            <p className="text-[10px] leading-tight truncate" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              在庫管理システム
+            </p>
+          </div>
+        </div>
 
-      {/* ─── フッター ─────────────────────────────────────── */}
-      <div
-        className="flex items-center px-5 py-3 flex-shrink-0"
-        style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
-      >
-        <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-          v0.1.0
-        </span>
-      </div>
-    </aside>
+        {/* ─── ナビゲーション ───────────────────────────────── */}
+        <nav className="flex-1 overflow-y-auto py-2">
+          {navGroups.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
+              {group.label && (
+                <p
+                  className="px-5 pb-1.5 text-[9px] font-bold uppercase tracking-widest"
+                  style={{ color: 'rgba(255,255,255,0.35)' }}
+                >
+                  {group.label}
+                </p>
+              )}
+              <ul className="space-y-0.5 px-2">
+                {group.items.map((item) => {
+                  const active = isActive(pathname, item.href)
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded text-sm transition-all"
+                        style={
+                          active
+                            ? {
+                                backgroundColor: '#00A0C8',
+                                color: '#ffffff',
+                                fontWeight: 600,
+                              }
+                            : {
+                                color: 'rgba(255,255,255,0.6)',
+                              }
+                        }
+                        onMouseEnter={(e) => {
+                          if (!active)
+                            (e.currentTarget as HTMLAnchorElement).style.backgroundColor =
+                              'rgba(255,255,255,0.08)'
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!active)
+                            (e.currentTarget as HTMLAnchorElement).style.backgroundColor =
+                              'transparent'
+                        }}
+                      >
+                        <span style={{ opacity: active ? 1 : 0.7 }} className="flex-shrink-0 flex items-center">
+                          <item.icon size={14} className="" />
+                        </span>
+                        <span className="truncate text-[13px]">{item.label}</span>
+                        {active && (
+                          <span
+                            className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: 'rgba(255,255,255,0.7)' }}
+                          />
+                        )}
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        {/* ─── フッター ─────────────────────────────────────── */}
+        <div
+          className="flex items-center px-5 py-3 flex-shrink-0"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+        >
+          <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            v0.1.0
+          </span>
+        </div>
+      </aside>
+    </>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/store/AuthContext'
 import { WmsProvider } from '@/store/WmsContext'
@@ -14,6 +14,7 @@ export default function MainLayout({
 }) {
   const { user, isLoading } = useAuth()
   const router = useRouter()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -34,10 +35,10 @@ export default function MainLayout({
   return (
     <WmsProvider>
       <div className="flex h-screen overflow-hidden bg-slate-100">
-        <Sidebar />
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <Header />
-          <main className="flex-1 overflow-auto p-6">{children}</main>
+          <Header onMenuClick={() => setSidebarOpen(true)} />
+          <main className="flex-1 overflow-auto p-4 sm:p-6">{children}</main>
         </div>
       </div>
     </WmsProvider>

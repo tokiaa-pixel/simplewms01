@@ -203,7 +203,7 @@ function SummaryBar({ items }: { items: InventoryItem[] }) {
   }, [items])
 
   return (
-    <div className="flex items-center gap-4 text-xs text-slate-500">
+    <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs text-slate-500">
       {counts.map(({ status, count }) => {
         const cfg = INVENTORY_STATUS_CONFIG[status]
         return (
@@ -278,7 +278,7 @@ export default function InventoryPage() {
           </select>
 
           {/* 件数 */}
-          <span className="text-xs text-slate-500 ml-auto">
+          <span className="text-xs text-slate-500 w-full sm:w-auto sm:ml-auto">
             {filtered.length !== inventoryData.length ? (
               <>
                 <strong className="text-slate-700">{filtered.length}</strong> 件
@@ -295,8 +295,52 @@ export default function InventoryPage() {
           <SummaryBar items={inventoryData} />
         </div>
 
-        {/* テーブル */}
-        <div className="overflow-x-auto">
+        {/* モバイル：カード表示 */}
+        <div className="sm:hidden divide-y divide-slate-100">
+          {filtered.length === 0 ? (
+            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
+              <Package size={28} />
+              <p className="text-sm">該当する在庫データがありません</p>
+              {(search || statusFilter !== 'all') && (
+                <button
+                  onClick={() => { setSearch(''); setStatusFilter('all') }}
+                  className="text-xs text-blue-500 hover:underline mt-1"
+                >
+                  フィルタをリセット
+                </button>
+              )}
+            </div>
+          ) : (
+            filtered.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => setSelected(item)}
+                className="px-4 py-4 cursor-pointer active:bg-blue-50/50"
+              >
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <span className="font-mono text-xs text-blue-600">{item.productCode}</span>
+                  <StatusBadge status={item.status} />
+                </div>
+                <p className="text-sm font-medium text-slate-800 mb-1.5">{item.productName}</p>
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="font-mono bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+                    {item.locationCode}
+                  </span>
+                  <span className={`font-semibold tabular-nums ${
+                    item.status === 'out_of_stock' ? 'text-red-600' :
+                    item.status === 'low' ? 'text-amber-600' : 'text-slate-800'
+                  }`}>
+                    {item.quantity.toLocaleString()}
+                    <span className="font-normal text-slate-400 ml-0.5">{item.unit}</span>
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* デスクトップ：テーブル表示 */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">

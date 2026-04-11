@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/store/AuthContext'
-import { LogOut, ChevronRight, UserCircle2 } from 'lucide-react'
+import { LogOut, ChevronRight, UserCircle2, Menu } from 'lucide-react'
 
 const PAGE_META: Record<string, { title: string; parent?: string }> = {
   '/dashboard':     { title: 'ダッシュボード' },
@@ -20,7 +20,7 @@ const ROLE_CONFIG: Record<string, { label: string; style: string }> = {
   operator: { label: '担当者',       style: 'bg-slate-100 text-slate-600 border border-slate-200' },
 }
 
-export default function Header() {
+export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const pathname = usePathname()
   const { user, logout } = useAuth()
   const router = useRouter()
@@ -37,7 +37,16 @@ export default function Header() {
       {/* ブランドカラーライン（上部） */}
       <div className="h-0.5 w-full" style={{ backgroundColor: '#00A0C8' }} />
 
-      <div className="flex-1 flex items-center px-6 gap-4 border-b border-slate-200">
+      <div className="flex-1 flex items-center px-3 sm:px-6 gap-2 sm:gap-4 border-b border-slate-200">
+        {/* ハンバーガーボタン（モバイルのみ） */}
+        <button
+          onClick={onMenuClick}
+          className="md:hidden p-2.5 rounded-md text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0"
+          aria-label="メニューを開く"
+        >
+          <Menu size={18} />
+        </button>
+
         {/* パンくず + ページタイトル */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {meta.parent && (
@@ -65,7 +74,7 @@ export default function Header() {
               {(() => {
                 const role = ROLE_CONFIG[user.role]
                 return role ? (
-                  <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${role.style}`}>
+                  <span className={`hidden sm:inline px-2 py-0.5 text-[10px] font-semibold rounded ${role.style}`}>
                     {role.label}
                   </span>
                 ) : null
@@ -76,7 +85,7 @@ export default function Header() {
 
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500
+              className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-slate-500
                          hover:text-red-600 hover:bg-red-50 rounded transition-colors"
             >
               <LogOut size={12} />

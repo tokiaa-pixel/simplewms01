@@ -133,7 +133,7 @@ export default function ShippingInputPage() {
           <p className="text-xs text-slate-400">
             出庫処理メニューからピッキング処理を開始してください
           </p>
-          <div className="flex gap-3 mt-3">
+          <div className="flex flex-col sm:flex-row gap-3 mt-3 w-full sm:w-auto">
             <button
               onClick={() => {
                 setCustomerId('')
@@ -143,13 +143,13 @@ export default function ShippingInputPage() {
                 setErrors({})
                 setSubmitted(false)
               }}
-              className="px-4 py-2 text-sm border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
+              className="px-4 py-2.5 text-sm border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
             >
               続けて登録
             </button>
             <button
               onClick={() => router.push('/shipping')}
-              className="px-4 py-2 text-sm bg-brand-navy text-white rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
+              className="px-4 py-2.5 text-sm bg-brand-navy text-white rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
             >
               出庫処理メニューへ
             </button>
@@ -181,7 +181,7 @@ export default function ShippingInputPage() {
 
       <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-6">
         {/* 出荷先 / 出庫予定日 */}
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               出荷先 <span className="text-red-500">*</span>
@@ -236,7 +236,8 @@ export default function ShippingInputPage() {
             )}
           </div>
 
-          <div className="border border-slate-200 rounded-lg overflow-hidden">
+          <div className="border border-slate-200 rounded-lg overflow-x-auto">
+            <div className="min-w-[460px]">
             {/* テーブルヘッダー */}
             <div className="grid grid-cols-[1fr_110px_130px_32px] bg-slate-50 border-b border-slate-200 px-3 py-2 gap-0">
               <span className="text-xs font-medium text-slate-500">商品</span>
@@ -349,6 +350,7 @@ export default function ShippingInputPage() {
                 商品を追加
               </button>
             </div>
+            </div>{/* min-w end */}
           </div>
         </div>
 
@@ -367,16 +369,16 @@ export default function ShippingInputPage() {
         </div>
 
         {/* フッター */}
-        <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2 border-t border-slate-100">
           <button
             onClick={() => router.push('/shipping')}
-            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
             キャンセル
           </button>
           <button
             onClick={handleSubmit}
-            className="px-5 py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
+            className="w-full sm:w-auto px-5 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium"
           >
             出庫指示を登録
           </button>
