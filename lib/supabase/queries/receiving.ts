@@ -185,15 +185,15 @@ export async function confirmArrivalReceiving(params: {
 
   try {
     // ── Step 1: 在庫の既存レコードを確認 ──────────────────────────
-    // 識別キー: product_id + location_id + status + received_date
-    // → 同じ商品・ロケーションでもステータス・入庫日が異なれば別ロットとして扱う
+    // 検索キーは DB の一意制約 (product_id, location_id, status) に合わせる。
+    // received_date を条件に含めると「日付違いの既存レコード」を見つけられず、
+    // INSERT に流れて duplicate key エラーになるため含めない。
     const { data: existingRaw, error: selectErr } = await supabase
       .from('inventory')
       .select('id, qty')
-      .eq('product_id',    productId)
-      .eq('location_id',   locationId)
-      .eq('status',        inventoryStatus)
-      .eq('received_date', receivedDate)
+      .eq('product_id',  productId)
+      .eq('location_id', locationId)
+      .eq('status',      inventoryStatus)
       .maybeSingle()
 
     if (selectErr) throw new Error(`在庫検索エラー: ${selectErr.message}`)
@@ -202,16 +202,15 @@ export async function confirmArrivalReceiving(params: {
 
     // ── Step 2: inventory を upsert（加算 or 新規） ───────────
     if (existing) {
-      // 同一 product_id + location_id + status のレコードが存在 → qty のみ加算
-      // status は既に一致しているため変更不要
+      // 同一 (product_id, location_id, status) のレコードが存在 → qty を加算
+      // received_date は最初に入庫した日付を保持し続ける（上書きしない）
       const { error: updateErr } = await dml('inventory')
         .update({ qty: Math.max(0, existing.qty + addQty) })
         .eq('id', existing.id)
 
       if (updateErr) throw new Error(`在庫更新エラー: ${updateErr.message}`)
     } else {
-      // 同一 product_id + location_id + status + received_date のレコードが存在しない
-      // → 新しいロットとして INSERT
+      // 存在しない → 新規 INSERT。received_date = 入庫確定日
       const { error: insertErr } = await dml('inventory')
         .insert({
           product_id:    productId,
