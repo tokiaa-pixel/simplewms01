@@ -88,18 +88,23 @@ function ReceivingModal({
 }: {
   arrival:     ArrivalDisplay
   onClose:     () => void
-  onConfirmed: () => void   // 確定後に一覧を再取得させるコールバック
+  onConfirmed: () => void   // 確定後に親一覧をバックグラウンド更新させるコールバック
 }) {
   const { t }  = useTranslation('receiving')
   const { t: tc } = useTranslation('common')
 
-  const remaining = arrival.plannedQty - arrival.receivedQty
-  const isReadOnly = arrival.status === 'completed' || arrival.status === 'cancelled'
+  // ── ローカル state（楽観的更新で即時反映） ────────────────
+  // arrival prop は初期値のみ使用。以降は currentArrival を参照する。
+  const [currentArrival, setCurrentArrival] = useState<ArrivalDisplay>(arrival)
+  const remaining  = currentArrival.plannedQty - currentArrival.receivedQty
+  const isReadOnly = currentArrival.status === 'completed' || currentArrival.status === 'cancelled'
 
-  const [inputQty, setInputQty] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]     = useState('')
-  const [confirmed, setConfirmed] = useState(false)
+  const [inputQty,         setInputQty]         = useState('')
+  const [submitting,       setSubmitting]        = useState(false)
+  const [error,            setError]             = useState('')
+  const [confirmed,        setConfirmed]         = useState(false)
+  // 直前に確定した数量（一部入庫フラッシュ表示 & 完了画面で使用）
+  const [lastConfirmedQty, setLastConfirmedQty]  = useState<number | null>(null)
 
   const handleConfirm = async () => {
     const qty = Math.floor(Number(inputQty))
@@ -113,7 +118,7 @@ function ReceivingModal({
       setError(`${t('errOverflow')} (${remaining})`)
       return
     }
-    if (!arrival.locationId) {
+    if (!currentArrival.locationId) {
       setError('ロケーションが設定されていません。入荷データを確認してください。')
       return
     }
@@ -121,14 +126,15 @@ function ReceivingModal({
     setSubmitting(true)
     setError('')
 
-    const newTotalReceived = arrival.receivedQty + qty
+    const newTotalReceived = currentArrival.receivedQty + qty
+    const isComplete       = newTotalReceived >= currentArrival.plannedQty
 
     const { error: err } = await confirmArrivalReceiving({
-      arrivalId:        arrival.id,
-      productId:        arrival.productId,
-      locationId:       arrival.locationId,
+      arrivalId:        currentArrival.id,
+      productId:        currentArrival.productId,
+      locationId:       currentArrival.locationId,
       addQty:           qty,
-      totalPlannedQty:  arrival.plannedQty,
+      totalPlannedQty:  currentArrival.plannedQty,
       totalReceivedQty: newTotalReceived,
     })
 
@@ -139,15 +145,28 @@ function ReceivingModal({
       return
     }
 
-    setConfirmed(true)
-    onConfirmed()   // 一覧を再取得
+    // ── 楽観的更新：DB成功後に即時反映 ────────────────────
+    const updated: ArrivalDisplay = {
+      ...currentArrival,
+      receivedQty: newTotalReceived,
+      status:      isComplete ? 'completed' : 'partial',
+    }
+    setCurrentArrival(updated)
+    setLastConfirmedQty(qty)
+    setInputQty('')
+
+    // 全数入庫完了 → 完了画面へ
+    if (isComplete) setConfirmed(true)
+
+    // 親一覧をバックグラウンドで更新（ローダー表示なし）
+    onConfirmed()
   }
 
-  // ── 完了画面 ─────────────────────────────────────────────
+  // ── 完了画面（全数入庫後） ───────────────────────────────
   if (confirmed) {
     return (
       <Modal
-        title={`${t('modalTitle')} - ${arrival.arrivalNo}`}
+        title={`${t('modalTitle')} - ${currentArrival.arrivalNo}`}
         onClose={onClose}
         size="md"
         locked={false}
@@ -155,10 +174,10 @@ function ReceivingModal({
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle size={40} className="text-green-500" />
           <p className="text-sm font-semibold text-slate-700">入庫確定しました ✓</p>
-          <p className="text-xs text-slate-500">{arrival.arrivalNo}</p>
+          <p className="text-xs text-slate-500">{currentArrival.arrivalNo}</p>
           <p className="text-xs text-slate-400">
-            {arrival.productCode} — {inputQty}{arrival.unit} を
-            {arrival.locationCode} に入庫
+            {currentArrival.productCode} — {lastConfirmedQty}{currentArrival.unit} を
+            {currentArrival.locationCode} に入庫
           </p>
           <button
             onClick={onClose}
@@ -174,7 +193,7 @@ function ReceivingModal({
   // ── 入力画面 ─────────────────────────────────────────────
   return (
     <Modal
-      title={`${t('modalTitle')} - ${arrival.arrivalNo}`}
+      title={`${t('modalTitle')} - ${currentArrival.arrivalNo}`}
       onClose={onClose}
       size="lg"
       locked={submitting}
@@ -190,13 +209,24 @@ function ReceivingModal({
 
       <div className="space-y-5">
 
+        {/* ── 一部入庫完了フラッシュ（残数あり確定後に表示） ── */}
+        {lastConfirmedQty !== null && (
+          <div className="bg-green-50 border border-green-200 rounded-md px-3 py-2 flex items-center gap-2 text-xs text-green-700">
+            <CheckCircle size={14} className="flex-shrink-0 text-green-500" />
+            <span>
+              <strong>{lastConfirmedQty}{currentArrival.unit}</strong> を {currentArrival.locationCode} に入庫しました。
+              残り <strong>{remaining}{currentArrival.unit}</strong> です。
+            </span>
+          </div>
+        )}
+
         {/* 入荷情報サマリ */}
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
           {([
-            [t('detailSupplier'), arrival.supplierName],
-            [t('detailStatus'),   <ArrivalStatusBadge key="badge" status={arrival.status} />],
-            [t('detailDate'),     arrival.arrivalDate],
-            [t('detailProgress'), `${arrival.receivedQty} / ${arrival.plannedQty} ${arrival.unit}`],
+            [t('detailSupplier'), currentArrival.supplierName],
+            [t('detailStatus'),   <ArrivalStatusBadge key="badge" status={currentArrival.status} />],
+            [t('detailDate'),     currentArrival.arrivalDate],
+            [t('detailProgress'), `${currentArrival.receivedQty} / ${currentArrival.plannedQty} ${currentArrival.unit}`],
           ] as [string, React.ReactNode][]).map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-20 flex-shrink-0">{label}</dt>
@@ -205,9 +235,9 @@ function ReceivingModal({
           ))}
         </div>
 
-        {arrival.memo && (
+        {currentArrival.memo && (
           <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-700">
-            {arrival.memo}
+            {currentArrival.memo}
           </div>
         )}
 
@@ -231,16 +261,16 @@ function ReceivingModal({
             </thead>
             <tbody>
               <tr className={remaining === 0 ? 'bg-green-50/30 opacity-70' : ''}>
-                <td className="px-4 py-3 font-mono text-blue-600">{arrival.productCode}</td>
-                <td className="px-4 py-3 text-slate-700">{arrival.productName}</td>
+                <td className="px-4 py-3 font-mono text-blue-600">{currentArrival.productCode}</td>
+                <td className="px-4 py-3 text-slate-700">{currentArrival.productName}</td>
                 <td className="px-4 py-3 font-mono text-slate-600">
-                  {arrival.locationCode || (
+                  {currentArrival.locationCode || (
                     <span className="text-red-400">未設定</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">{arrival.plannedQty}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{currentArrival.plannedQty}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-green-700 font-medium">
-                  {arrival.receivedQty}
+                  {currentArrival.receivedQty}
                 </td>
                 <td className={`px-4 py-3 text-right tabular-nums font-medium ${
                   remaining === 0 ? 'text-green-600' : 'text-amber-600'
@@ -260,6 +290,7 @@ function ReceivingModal({
                         onChange={(e) => {
                           setInputQty(e.target.value)
                           setError('')
+                          if (lastConfirmedQty !== null) setLastConfirmedQty(null)
                         }}
                         placeholder="0"
                         className="w-20 border border-slate-300 rounded px-2 py-2 text-right focus:outline-none focus:ring-2 focus:ring-brand-teal"
@@ -339,10 +370,11 @@ export default function ReceivingPage() {
     loadArrivals()
   }, [loadArrivals])
 
-  // 確定後に選択をリセットしてリロード
-  const handleConfirmed = useCallback(() => {
-    loadArrivals()
-  }, [loadArrivals])
+  // 確定後のバックグラウンド更新（ローダー表示なし・selected は維持）
+  const handleConfirmed = useCallback(async () => {
+    const { data, error } = await fetchArrivals()
+    if (!error) setArrivals(data)
+  }, [])
 
   const statusFilterOptions = [
     { value: 'all'       as const, label: t('filterAll') },
