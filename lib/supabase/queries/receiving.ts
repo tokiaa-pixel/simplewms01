@@ -1,11 +1,15 @@
 import { supabase } from '@/lib/supabase/client'
 import type { ArrivalStatus } from '@/lib/types'
 
+// Helper: bypass typed-client generics for DML (Insert/Update resolve as never with self-referential types)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const from = (table: string) => (supabase as any).from(table)
+
 // =============================================================
 // 型定義
 // =============================================================
 
-/** Supabase から返ってくる生データ */
+/** Supabase から返ってくる arrivals + JOIN の生データ */
 type ArrivalRow = {
   id:                  string
   arrival_no:          string
@@ -17,35 +21,32 @@ type ArrivalRow = {
   actual_location_id:  string | null
   status:              string
   memo:                string | null
-  suppliers: {
-    supplier_name_ja: string
-  } | null
-  products: {
-    product_code:    string
-    product_name_ja: string
-    unit:            string
-  } | null
-  // planned_location の JOIN（エイリアスは Supabase では使えないので別途解決）
-  planned_location:  { location_code: string } | null
-  actual_location:   { location_code: string } | null
+  suppliers: { supplier_name_ja: string } | null
+  products:  { product_code: string; product_name_ja: string; unit: string } | null
 }
+
+/** locations 一括取得の生データ */
+type LocationRow = { id: string; location_code: string }
+
+/** inventory SELECT の生データ */
+type InventoryRow = { id: string; qty: number }
 
 /** UI で使う整形済み入荷データ */
 export type ArrivalDisplay = {
-  id:              string   // arrivals.id（UUID）
-  arrivalNo:       string   // ARR-YYYY-NNNN
-  arrivalDate:     string   // YYYY/MM/DD
-  supplierName:    string
-  productId:       string   // UUID（inventory upsert 用）
-  productCode:     string
-  productName:     string
-  unit:            string
-  plannedQty:      number
-  receivedQty:     number   // 累積入庫済み数量
-  locationId:      string   // actual_location_id ?? planned_location_id
-  locationCode:    string
-  status:          ArrivalStatus
-  memo:            string | null
+  id:           string
+  arrivalNo:    string
+  arrivalDate:  string
+  supplierName: string
+  productId:    string
+  productCode:  string
+  productName:  string
+  unit:         string
+  plannedQty:   number
+  receivedQty:  number
+  locationId:   string
+  locationCode: string
+  status:       ArrivalStatus
+  memo:         string | null
 }
 
 // =============================================================
@@ -70,8 +71,6 @@ export async function fetchArrivals(): Promise<{
   data: ArrivalDisplay[]
   error: string | null
 }> {
-  // Supabase では同じテーブルを別FK で2回 JOIN できないため
-  // planned_location_id / actual_location_id は別クエリで解決する
   const { data, error } = await supabase
     .from('arrivals')
     .select(`
@@ -92,16 +91,17 @@ export async function fetchArrivals(): Promise<{
 
   if (error) return { data: [], error: error.message }
 
-  // location_code を取得するため、使われる location_id を一括クエリ
+  const rows = data as unknown as ArrivalRow[]
+
+  // planned_location_id / actual_location_id を location_code に変換（一括取得）
   const locationIds = Array.from(
     new Set(
-      (data as ArrivalRow[]).flatMap((r) =>
-        [r.actual_location_id, r.planned_location_id].filter(Boolean) as string[]
+      rows.flatMap((r) =>
+        [r.actual_location_id, r.planned_location_id].filter((v): v is string => v !== null)
       )
     )
   )
 
-  type LocationRow = { id: string; location_code: string }
   let locationMap: Record<string, string> = {}
   if (locationIds.length > 0) {
     const { data: locs } = await supabase
@@ -110,12 +110,12 @@ export async function fetchArrivals(): Promise<{
       .in('id', locationIds)
     if (locs) {
       locationMap = Object.fromEntries(
-        (locs as LocationRow[]).map((l) => [l.id, l.location_code])
+        (locs as unknown as LocationRow[]).map((l) => [l.id, l.location_code])
       )
     }
   }
 
-  const items: ArrivalDisplay[] = (data as ArrivalRow[]).map((row) => {
+  const items: ArrivalDisplay[] = rows.map((row) => {
     const locationId = row.actual_location_id ?? row.planned_location_id ?? ''
     return {
       id:           row.id,
@@ -147,21 +147,20 @@ export async function fetchArrivals(): Promise<{
 // =============================================================
 
 export async function confirmArrivalReceiving(params: {
-  arrivalId:   string
-  productId:   string
-  locationId:  string
-  addQty:      number   // 今回入庫する数量
+  arrivalId:        string
+  productId:        string
+  locationId:       string
+  addQty:           number   // 今回入庫する数量
   totalPlannedQty:  number
-  totalReceivedQty: number  // 今回分を足した後の累積値
+  totalReceivedQty: number   // 今回分を加えた後の累積値
 }): Promise<{ error: string | null }> {
   const { arrivalId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty } = params
 
-  if (addQty <= 0) return { error: '入庫数量は1以上を指定してください' }
-  if (!locationId)  return { error: 'ロケーションが設定されていません' }
+  if (addQty <= 0)   return { error: '入庫数量は1以上を指定してください' }
+  if (!locationId)   return { error: 'ロケーションが設定されていません' }
 
   try {
     // ── Step 1: 在庫の既存レコードを確認 ──────────────────────
-    type InventoryRow = { id: string; qty: number }
     const { data: existingRaw, error: selectErr } = await supabase
       .from('inventory')
       .select('id, qty')
@@ -171,22 +170,19 @@ export async function confirmArrivalReceiving(params: {
 
     if (selectErr) throw new Error(`在庫検索エラー: ${selectErr.message}`)
 
-    const existing = existingRaw as InventoryRow | null
+    const existing = existingRaw as unknown as InventoryRow | null
 
     // ── Step 2: inventory を upsert（加算 or 新規） ───────────
     if (existing) {
       // 既存レコードあり → qty を加算
-      const newQty = Math.max(0, existing.qty + addQty)
-      const { error: updateErr } = await supabase
-        .from('inventory')
-        .update({ qty: newQty, updated_at: new Date().toISOString() })
+      const { error: updateErr } = await from('inventory')
+        .update({ qty: Math.max(0, existing.qty + addQty) })
         .eq('id', existing.id)
 
       if (updateErr) throw new Error(`在庫更新エラー: ${updateErr.message}`)
     } else {
       // 既存レコードなし → 新規 INSERT
-      const { error: insertErr } = await supabase
-        .from('inventory')
+      const { error: insertErr } = await from('inventory')
         .insert({
           product_id:  productId,
           location_id: locationId,
@@ -198,15 +194,10 @@ export async function confirmArrivalReceiving(params: {
     }
 
     // ── Step 3: arrivals を更新 ────────────────────────────────
-    const isCompleted = totalReceivedQty >= totalPlannedQty
-    const newStatus   = isCompleted ? 'completed' : 'receiving'
-
-    const { error: arrivalErr } = await supabase
-      .from('arrivals')
+    const { error: arrivalErr } = await from('arrivals')
       .update({
         received_qty: totalReceivedQty,
-        status:       newStatus,
-        updated_at:   new Date().toISOString(),
+        status:       totalReceivedQty >= totalPlannedQty ? 'completed' : 'receiving',
       })
       .eq('id', arrivalId)
 
