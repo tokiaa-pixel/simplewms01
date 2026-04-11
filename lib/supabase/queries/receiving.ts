@@ -161,7 +161,8 @@ export async function confirmArrivalReceiving(params: {
 
   try {
     // ── Step 1: 在庫の既存レコードを確認 ──────────────────────
-    const { data: existing, error: selectErr } = await supabase
+    type InventoryRow = { id: string; qty: number }
+    const { data: existingRaw, error: selectErr } = await supabase
       .from('inventory')
       .select('id, qty')
       .eq('product_id', productId)
@@ -169,6 +170,8 @@ export async function confirmArrivalReceiving(params: {
       .maybeSingle()
 
     if (selectErr) throw new Error(`在庫検索エラー: ${selectErr.message}`)
+
+    const existing = existingRaw as InventoryRow | null
 
     // ── Step 2: inventory を upsert（加算 or 新規） ───────────
     if (existing) {
