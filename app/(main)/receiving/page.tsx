@@ -141,6 +141,7 @@ function ReceivingModal({
       totalPlannedQty:  currentArrival.plannedQty,
       totalReceivedQty: newTotalReceived,
       inventoryStatus,
+      receivedDate:     currentArrival.arrivalDateRaw,
     })
 
     setSubmitting(false)

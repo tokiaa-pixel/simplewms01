@@ -36,6 +36,7 @@ export interface InventoryItem {
   minStock: number
   maxStock: number
   updatedAt: string
+  receivedDate?: string   // 入庫日 (YYYY/MM/DD)。FIFO 引当の基準日
   lotNumber?: string
   supplierName?: string
   note?: string

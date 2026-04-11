@@ -183,6 +183,7 @@ export interface Translations {
     colLocation: string
     colStatus: string
     colUpdated: string
+    colReceivedDate: string
     modalTitle: string
     detailCode: string
     detailName: string
@@ -194,6 +195,7 @@ export interface Translations {
     detailMax: string
     detailUpdated: string
     detailLot: string
+    detailReceivedDate: string
     detailSupplier: string
     detailNote: string
     filterAll: string

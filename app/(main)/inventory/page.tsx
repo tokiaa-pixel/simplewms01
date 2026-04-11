@@ -126,6 +126,11 @@ function InventoryDetailModal({
             />
             <DetailRow label={t('colStatus')}     value={<StatusBadge status={item.status} />} />
             <DetailRow label={t('detailLocation')} value={<span className="font-mono">{item.locationCode}</span>} />
+            {item.receivedDate && (
+              <DetailRow label={t('detailReceivedDate')} value={
+                <span className="tabular-nums">{item.receivedDate}</span>
+              } />
+            )}
             {item.lotNumber && (
               <DetailRow label={t('detailLot')} value={<span className="font-mono">{item.lotNumber}</span>} />
             )}
@@ -380,13 +385,14 @@ export default function InventoryPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colUnit')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colLocation')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colStatus')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colReceivedDate')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colUpdated')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <Package size={28} />
                       <p className="text-sm">{t('empty')}</p>
@@ -429,6 +435,9 @@ export default function InventoryPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
+                    <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap tabular-nums">
+                      {item.receivedDate ?? <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{item.updatedAt}</td>
                   </tr>
                 ))

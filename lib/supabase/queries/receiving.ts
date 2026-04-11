@@ -44,21 +44,22 @@ type SiblingRow    = { status: string; received_qty: number }
 
 /** UI で使う整形済み入庫明細データ（arrival_lines 1行に対応） */
 export type ArrivalDisplay = {
-  id:           string   // arrival_lines.id
-  headerId:     string   // arrival_headers.id（header status 再計算に使用）
-  arrivalNo:    string
-  arrivalDate:  string
-  supplierName: string
-  productId:    string
-  productCode:  string
-  productName:  string
-  unit:         string
-  plannedQty:   number
-  receivedQty:  number
-  locationId:   string
-  locationCode: string
-  status:       ArrivalStatus   // line の status を変換
-  memo:         string | null
+  id:              string   // arrival_lines.id
+  headerId:        string   // arrival_headers.id（header status 再計算に使用）
+  arrivalNo:       string
+  arrivalDate:     string   // 表示用フォーマット済み
+  arrivalDateRaw:  string   // DB 生値 (YYYY-MM-DD)。inventory.received_date に使用
+  supplierName:    string
+  productId:       string
+  productCode:     string
+  productName:     string
+  unit:            string
+  plannedQty:      number
+  receivedQty:     number
+  locationId:      string
+  locationCode:    string
+  status:          ArrivalStatus   // line の status を変換
+  memo:            string | null
 }
 
 // =============================================================
@@ -137,23 +138,25 @@ export async function fetchArrivals(): Promise<{
   })
 
   const items: ArrivalDisplay[] = rows.map((row) => {
-    const locationId = row.planned_location_id ?? ''
+    const locationId   = row.planned_location_id ?? ''
+    const rawDate      = row.arrival_headers?.arrival_date ?? ''
     return {
-      id:           row.id,
-      headerId:     row.arrival_headers?.id          ?? '',
-      arrivalNo:    row.arrival_headers?.arrival_no  ?? '',
-      arrivalDate:  formatDate(row.arrival_headers?.arrival_date ?? ''),
-      supplierName: row.arrival_headers?.suppliers?.supplier_name_ja ?? '',
-      productId:    row.product_id,
-      productCode:  row.products?.product_code    ?? '',
-      productName:  row.products?.product_name_ja ?? '',
-      unit:         row.products?.unit            ?? '',
-      plannedQty:   Number(row.planned_qty),
-      receivedQty:  Number(row.received_qty),
+      id:             row.id,
+      headerId:       row.arrival_headers?.id          ?? '',
+      arrivalNo:      row.arrival_headers?.arrival_no  ?? '',
+      arrivalDate:    formatDate(rawDate),
+      arrivalDateRaw: rawDate,   // YYYY-MM-DD のまま保持
+      supplierName:   row.arrival_headers?.suppliers?.supplier_name_ja ?? '',
+      productId:      row.product_id,
+      productCode:    row.products?.product_code    ?? '',
+      productName:    row.products?.product_name_ja ?? '',
+      unit:           row.products?.unit            ?? '',
+      plannedQty:     Number(row.planned_qty),
+      receivedQty:    Number(row.received_qty),
       locationId,
-      locationCode: locationId ? (locationMap[locationId] ?? '') : '',
-      status:       toArrivalStatus(row.status),
-      memo:         row.memo,
+      locationCode:   locationId ? (locationMap[locationId] ?? '') : '',
+      status:         toArrivalStatus(row.status),
+      memo:           row.memo,
     }
   })
 
@@ -173,22 +176,24 @@ export async function confirmArrivalReceiving(params: {
   totalPlannedQty:  number
   totalReceivedQty: number   // 今回分を加えた後の累積値
   inventoryStatus:  InventoryStatus  // 入庫確定時の在庫ステータス
+  receivedDate:     string   // 入庫日 YYYY-MM-DD。arrival_headers.arrival_date を使用
 }): Promise<{ error: string | null }> {
-  const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty, inventoryStatus } = params
+  const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty, inventoryStatus, receivedDate } = params
 
   if (addQty <= 0)  return { error: '入庫数量は1以上を指定してください' }
   if (!locationId)  return { error: 'ロケーションが設定されていません' }
 
   try {
-    // ── Step 1: 在庫の既存レコードを確認（status も一致条件に含める） ──
-    // product_id + location_id + status の組み合わせで検索することで、
-    // 同じ商品・同じロケーションでも status が異なれば別レコードとして扱う
+    // ── Step 1: 在庫の既存レコードを確認 ──────────────────────────
+    // 識別キー: product_id + location_id + status + received_date
+    // → 同じ商品・ロケーションでもステータス・入庫日が異なれば別ロットとして扱う
     const { data: existingRaw, error: selectErr } = await supabase
       .from('inventory')
       .select('id, qty')
-      .eq('product_id', productId)
-      .eq('location_id', locationId)
-      .eq('status', inventoryStatus)
+      .eq('product_id',    productId)
+      .eq('location_id',   locationId)
+      .eq('status',        inventoryStatus)
+      .eq('received_date', receivedDate)
       .maybeSingle()
 
     if (selectErr) throw new Error(`在庫検索エラー: ${selectErr.message}`)
@@ -205,12 +210,15 @@ export async function confirmArrivalReceiving(params: {
 
       if (updateErr) throw new Error(`在庫更新エラー: ${updateErr.message}`)
     } else {
+      // 同一 product_id + location_id + status + received_date のレコードが存在しない
+      // → 新しいロットとして INSERT
       const { error: insertErr } = await dml('inventory')
         .insert({
-          product_id:  productId,
-          location_id: locationId,
-          qty:         addQty,
-          status:      inventoryStatus,
+          product_id:    productId,
+          location_id:   locationId,
+          qty:           addQty,
+          status:        inventoryStatus,
+          received_date: receivedDate || null,
         })
 
       if (insertErr) throw new Error(`在庫登録エラー: ${insertErr.message}`)

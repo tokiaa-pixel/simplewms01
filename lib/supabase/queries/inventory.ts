@@ -4,10 +4,11 @@ import type { InventoryItem, InventoryStatus } from '@/lib/types'
 // ─── Supabase SELECT の結合結果型 ─────────────────────────────
 
 type InventoryRow = {
-  id:         string
-  qty:        number
-  status:     string
-  updated_at: string
+  id:            string
+  qty:           number
+  status:        string
+  received_date: string | null
+  updated_at:    string
   products: {
     product_code:    string
     product_name_ja: string
@@ -30,6 +31,13 @@ function toInventoryStatus(raw: string): InventoryStatus {
 
 // ─── Supabase Row → アプリ内 InventoryItem ────────────────────
 
+function formatDate(raw: string | null): string {
+  if (!raw) return ''
+  return new Date(raw).toLocaleDateString('ja-JP', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  })
+}
+
 function toInventoryItem(row: InventoryRow): InventoryItem {
   const p = row.products
   const l = row.locations
@@ -44,11 +52,8 @@ function toInventoryItem(row: InventoryRow): InventoryItem {
     status:       toInventoryStatus(row.status),
     minStock:     0,
     maxStock:     0,
-    updatedAt:    row.updated_at
-      ? new Date(row.updated_at).toLocaleDateString('ja-JP', {
-          year: 'numeric', month: '2-digit', day: '2-digit',
-        })
-      : '',
+    receivedDate: row.received_date ? formatDate(row.received_date) : undefined,
+    updatedAt:    formatDate(row.updated_at),
   }
 }
 
@@ -61,11 +66,13 @@ export async function fetchInventory(): Promise<{
   const { data, error } = await supabase
     .from('inventory')
     .select(`
-      id, qty, status, updated_at,
+      id, qty, status, received_date, updated_at,
       products  ( product_code, product_name_ja, category, unit ),
       locations ( location_code )
     `)
-    .order('updated_at', { ascending: false })
+    // 入庫日昇順（古い在庫が先頭＝FIFO 視点での表示順）。nulls last
+    .order('received_date', { ascending: true, nullsFirst: false })
+    .order('updated_at',    { ascending: false })
 
   if (error) return { data: [], error: error.message }
 

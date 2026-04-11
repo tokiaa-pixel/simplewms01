@@ -74,28 +74,31 @@ export interface Database {
       // ─── 在庫台帳 ─────────────────────────────────────────────
       inventory: {
         Row: {
-          id:          string
-          qty:         number
-          product_id:  string
-          location_id: string
-          status:      string
-          updated_by:  string | null
-          created_at:  string
-          updated_at:  string
+          id:            string
+          qty:           number
+          product_id:    string
+          location_id:   string
+          status:        string
+          received_date: string | null   // DATE (YYYY-MM-DD)。FIFO 引当の基準日
+          updated_by:    string | null
+          created_at:    string
+          updated_at:    string
         }
         Insert: {
-          qty:          number
-          product_id:   string
-          location_id:  string
-          status:       string
-          updated_by?:  string | null
+          qty:             number
+          product_id:      string
+          location_id:     string
+          status:          string
+          received_date?:  string | null
+          updated_by?:     string | null
         }
         Update: {
-          qty?:         number
-          product_id?:  string
-          location_id?: string
-          status?:      string
-          updated_by?:  string | null
+          qty?:            number
+          product_id?:     string
+          location_id?:    string
+          status?:         string
+          received_date?:  string | null
+          updated_by?:     string | null
         }
       }
 
