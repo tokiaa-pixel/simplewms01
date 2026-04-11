@@ -8,6 +8,8 @@ interface ModalProps {
   onClose: () => void
   children: React.ReactNode
   size?: 'sm' | 'md' | 'lg'
+  /** true のとき × ボタン・背景クリック・Escキーを無効化する */
+  locked?: boolean
 }
 
 const SIZE_CLASS = {
@@ -21,14 +23,15 @@ export default function Modal({
   onClose,
   children,
   size = 'md',
+  locked = false,
 }: ModalProps) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !locked) onClose()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [onClose, locked])
 
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -40,7 +43,7 @@ export default function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:px-4"
-      onClick={onClose}
+      onClick={locked ? undefined : onClose}
     >
       {/* オーバーレイ */}
       <div className="absolute inset-0 bg-slate-900/50" />
@@ -62,8 +65,9 @@ export default function Modal({
           <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-slate-300 rounded-full sm:hidden" />
           <h2 className="text-sm font-semibold text-slate-800 mt-1 sm:mt-0">{title}</h2>
           <button
-            onClick={onClose}
-            className="p-2 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0"
+            onClick={locked ? undefined : onClose}
+            disabled={locked}
+            className="p-2 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="閉じる"
           >
             <X size={15} />
@@ -71,7 +75,7 @@ export default function Modal({
         </div>
 
         {/* ボディ（スクロール可） */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</div>
+        <div className="relative flex-1 overflow-y-auto p-4 sm:p-6">{children}</div>
       </div>
     </div>
   )
