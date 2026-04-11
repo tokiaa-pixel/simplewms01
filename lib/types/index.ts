@@ -1,30 +1,26 @@
 // ─── 在庫ステータス ───────────────────────────────────────────
+// inventory.status の DB 値と 1:1 対応（変換マッピング不要）
 
-export type InventoryStatus = 'normal' | 'low' | 'out_of_stock' | 'excess'
+export type InventoryStatus = 'available' | 'damaged' | 'hold'
 
 export const INVENTORY_STATUS_CONFIG: Record<
   InventoryStatus,
   { label: string; badgeClass: string; dotClass: string }
 > = {
-  normal: {
-    label: '適正',
+  available: {
+    label: '通常',
     badgeClass: 'bg-green-50 text-green-700 ring-1 ring-green-200',
     dotClass: 'bg-green-500',
   },
-  low: {
-    label: '残少',
-    badgeClass: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
-    dotClass: 'bg-amber-500',
-  },
-  out_of_stock: {
-    label: '在庫なし',
+  damaged: {
+    label: '破損',
     badgeClass: 'bg-red-50 text-red-700 ring-1 ring-red-200',
     dotClass: 'bg-red-500',
   },
-  excess: {
-    label: '過剰',
-    badgeClass: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
-    dotClass: 'bg-blue-500',
+  hold: {
+    label: '保留',
+    badgeClass: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+    dotClass: 'bg-amber-500',
   },
 }
 

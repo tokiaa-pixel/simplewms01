@@ -392,9 +392,8 @@ export interface Translations {
     shipping_inspected: string
     shipping_shipped: string
     shipping_cancelled: string
-    inventory_normal: string
-    inventory_low: string
-    inventory_out_of_stock: string
-    inventory_excess: string
+    inventory_available: string
+    inventory_damaged: string
+    inventory_hold: string
   }
 }

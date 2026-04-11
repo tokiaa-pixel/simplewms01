@@ -40,9 +40,8 @@ function StockLevelBar({ item }: { item: InventoryItem }) {
     ? Math.min((item.quantity / item.maxStock) * 100, 100)
     : 0
   const barColor =
-    item.status === 'out_of_stock' ? 'bg-red-400' :
-    item.status === 'low'         ? 'bg-amber-400' :
-    item.status === 'excess'      ? 'bg-blue-400' :
+    item.status === 'damaged' ? 'bg-red-400' :
+    item.status === 'hold'    ? 'bg-amber-400' :
     'bg-green-400'
 
   return (
@@ -116,8 +115,8 @@ function InventoryDetailModal({
               label={t('detailQty')}
               value={
                 <span className={`text-base font-bold ${
-                  item.status === 'out_of_stock' ? 'text-red-600' :
-                  item.status === 'low'          ? 'text-amber-600' :
+                  item.status === 'damaged' ? 'text-red-600' :
+                  item.status === 'hold'    ? 'text-amber-600' :
                   'text-slate-800'
                 }`}>
                   {item.quantity.toLocaleString()}
@@ -225,11 +224,10 @@ export default function InventoryPage() {
   }, [])
 
   const statusOptions: { value: InventoryStatus | 'all'; label: string }[] = [
-    { value: 'all',         label: tc('all') },
-    { value: 'normal',      label: ts('inventory_normal') },
-    { value: 'low',         label: ts('inventory_low') },
-    { value: 'out_of_stock',label: ts('inventory_out_of_stock') },
-    { value: 'excess',      label: ts('inventory_excess') },
+    { value: 'all',       label: tc('all') },
+    { value: 'available', label: ts('inventory_available') },
+    { value: 'damaged',   label: ts('inventory_damaged') },
+    { value: 'hold',      label: ts('inventory_hold') },
   ]
 
   const filtered = useMemo(() => {
@@ -358,8 +356,8 @@ export default function InventoryPage() {
                     {item.locationCode}
                   </span>
                   <span className={`font-semibold tabular-nums ${
-                    item.status === 'out_of_stock' ? 'text-red-600' :
-                    item.status === 'low' ? 'text-amber-600' : 'text-slate-800'
+                    item.status === 'damaged' ? 'text-red-600' :
+                    item.status === 'hold'    ? 'text-amber-600' : 'text-slate-800'
                   }`}>
                     {item.quantity.toLocaleString()}
                     <span className="font-normal text-slate-400 ml-0.5">{item.unit}</span>
@@ -418,8 +416,8 @@ export default function InventoryPage() {
                       <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{item.category}</span>
                     </td>
                     <td className={`px-4 py-3 text-right tabular-nums font-semibold ${
-                      item.status === 'out_of_stock' ? 'text-red-600' :
-                      item.status === 'low'          ? 'text-amber-600' :
+                      item.status === 'damaged' ? 'text-red-600' :
+                      item.status === 'hold'    ? 'text-amber-600' :
                       'text-slate-800'
                     }`}>
                       {item.quantity.toLocaleString()}

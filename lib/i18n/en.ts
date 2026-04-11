@@ -399,9 +399,8 @@ export const en: Translations = {
     shipping_inspected:    'Inspected',
     shipping_shipped:      'Shipped',
     shipping_cancelled:    'Cancelled',
-    inventory_normal:      'Normal',
-    inventory_low:         'Low',
-    inventory_out_of_stock:'Out of Stock',
-    inventory_excess:      'Excess',
+    inventory_available: 'Available',
+    inventory_damaged:   'Damaged',
+    inventory_hold:      'Hold',
   },
 }

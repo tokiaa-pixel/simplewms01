@@ -399,9 +399,8 @@ export const ja: Translations = {
     shipping_inspected:    '検品済み',
     shipping_shipped:      '出庫完了',
     shipping_cancelled:    'キャンセル',
-    inventory_normal:      '適正',
-    inventory_low:         '残少',
-    inventory_out_of_stock:'在庫なし',
-    inventory_excess:      '過剰',
+    inventory_available: '通常',
+    inventory_damaged:   '破損',
+    inventory_hold:      '保留',
   },
 }

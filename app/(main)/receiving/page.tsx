@@ -6,7 +6,9 @@ import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/lib/i18n'
 import {
   type ArrivalStatus,
+  type InventoryStatus,
   ARRIVAL_STATUS_CONFIG,
+  INVENTORY_STATUS_CONFIG,
 } from '@/lib/types'
 import {
   type ArrivalDisplay,
@@ -100,6 +102,7 @@ function ReceivingModal({
   const isReadOnly = currentArrival.status === 'completed' || currentArrival.status === 'cancelled'
 
   const [inputQty,         setInputQty]         = useState('')
+  const [inventoryStatus,  setInventoryStatus]   = useState<InventoryStatus>('available')
   const [submitting,       setSubmitting]        = useState(false)
   const [error,            setError]             = useState('')
   const [confirmed,        setConfirmed]         = useState(false)
@@ -137,6 +140,7 @@ function ReceivingModal({
       addQty:           qty,
       totalPlannedQty:  currentArrival.plannedQty,
       totalReceivedQty: newTotalReceived,
+      inventoryStatus,
     })
 
     setSubmitting(false)
@@ -155,6 +159,7 @@ function ReceivingModal({
     setCurrentArrival(updated)
     setLastConfirmedQty(qty)
     setInputQty('')
+    setInventoryStatus('available')
 
     // 全数入庫完了 → 完了画面へ
     if (isComplete) setConfirmed(true)
@@ -303,6 +308,34 @@ function ReceivingModal({
             </tbody>
           </table>
         </div>
+
+        {/* 在庫ステータス選択 */}
+        {!isReadOnly && remaining > 0 && (
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-slate-500 flex-shrink-0">在庫ステータス</label>
+            <div className="flex gap-2 flex-wrap">
+              {(Object.keys(INVENTORY_STATUS_CONFIG) as InventoryStatus[]).map((key) => {
+                const cfg     = INVENTORY_STATUS_CONFIG[key]
+                const isActive = inventoryStatus === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setInventoryStatus(key)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium ring-1 transition-all ${
+                      isActive
+                        ? cfg.badgeClass + ' ring-offset-1 shadow-sm'
+                        : 'bg-white text-slate-500 ring-slate-200 hover:ring-slate-300'
+                    }`}
+                  >
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${isActive ? cfg.dotClass : 'bg-slate-300'}`} />
+                    {cfg.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* エラー表示 */}
         {error && (

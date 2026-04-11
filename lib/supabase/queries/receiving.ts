@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client'
-import type { ArrivalStatus } from '@/lib/types'
+import type { ArrivalStatus, InventoryStatus } from '@/lib/types'
 import { deriveHeaderStatus } from './arrivals'
 
 // Supabase typed client が DML の Insert/Update 型を never に解決するため、
@@ -172,8 +172,9 @@ export async function confirmArrivalReceiving(params: {
   addQty:           number   // 今回入庫する数量
   totalPlannedQty:  number
   totalReceivedQty: number   // 今回分を加えた後の累積値
+  inventoryStatus:  InventoryStatus  // 入庫確定時の在庫ステータス
 }): Promise<{ error: string | null }> {
-  const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty } = params
+  const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty, inventoryStatus } = params
 
   if (addQty <= 0)  return { error: '入庫数量は1以上を指定してください' }
   if (!locationId)  return { error: 'ロケーションが設定されていません' }
@@ -194,7 +195,7 @@ export async function confirmArrivalReceiving(params: {
     // ── Step 2: inventory を upsert（加算 or 新規） ───────────
     if (existing) {
       const { error: updateErr } = await dml('inventory')
-        .update({ qty: Math.max(0, existing.qty + addQty) })
+        .update({ qty: Math.max(0, existing.qty + addQty), status: inventoryStatus })
         .eq('id', existing.id)
 
       if (updateErr) throw new Error(`在庫更新エラー: ${updateErr.message}`)
@@ -204,7 +205,7 @@ export async function confirmArrivalReceiving(params: {
           product_id:  productId,
           location_id: locationId,
           qty:         addQty,
-          status:      'available',
+          status:      inventoryStatus,
         })
 
       if (insertErr) throw new Error(`在庫登録エラー: ${insertErr.message}`)
