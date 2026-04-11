@@ -228,8 +228,9 @@ export async function confirmArrivalReceiving(params: {
 
     const { error: lineErr } = await dml('arrival_lines')
       .update({
-        received_qty: totalReceivedQty,
-        status:       isLineComplete ? 'completed' : 'receiving',
+        received_qty:       totalReceivedQty,
+        status:             isLineComplete ? 'completed' : 'receiving',
+        actual_location_id: locationId,   // 入庫処理画面で選択した保管場所
       })
       .eq('id', lineId)
 

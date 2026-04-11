@@ -15,6 +15,10 @@ import {
   fetchArrivals,
   confirmArrivalReceiving,
 } from '@/lib/supabase/queries/receiving'
+import {
+  type LocationOption,
+  fetchLocationOptions,
+} from '@/lib/supabase/queries/arrivals'
 
 // =============================================================
 // ユーティリティ
@@ -85,29 +89,40 @@ function ProgressBar({
 
 function ReceivingModal({
   arrival,
+  locations,
+  initialLocationId,
+  onLocationChange,
   onClose,
   onConfirmed,
 }: {
-  arrival:     ArrivalDisplay
-  onClose:     () => void
-  onConfirmed: () => void   // 確定後に親一覧をバックグラウンド更新させるコールバック
+  arrival:            ArrivalDisplay
+  locations:          LocationOption[]
+  initialLocationId:  string            // 親が保持する明細ごとの前回選択値
+  onLocationChange:   (id: string) => void
+  onClose:            () => void
+  onConfirmed:        () => void
 }) {
   const { t }  = useTranslation('receiving')
   const { t: tc } = useTranslation('common')
 
   // ── ローカル state（楽観的更新で即時反映） ────────────────
-  // arrival prop は初期値のみ使用。以降は currentArrival を参照する。
   const [currentArrival, setCurrentArrival] = useState<ArrivalDisplay>(arrival)
   const remaining  = currentArrival.plannedQty - currentArrival.receivedQty
   const isReadOnly = currentArrival.status === 'completed' || currentArrival.status === 'cancelled'
 
-  const [inputQty,         setInputQty]         = useState('')
-  const [inventoryStatus,  setInventoryStatus]   = useState<InventoryStatus>('available')
-  const [submitting,       setSubmitting]        = useState(false)
-  const [error,            setError]             = useState('')
-  const [confirmed,        setConfirmed]         = useState(false)
-  // 直前に確定した数量（一部入庫フラッシュ表示 & 完了画面で使用）
-  const [lastConfirmedQty, setLastConfirmedQty]  = useState<number | null>(null)
+  const [inputQty,           setInputQty]           = useState('')
+  // 保管場所：親が明細 id をキーに保持する前回選択値を初期値として使用
+  const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId)
+  const [inventoryStatus,    setInventoryStatus]    = useState<InventoryStatus>('available')
+  const [submitting,         setSubmitting]         = useState(false)
+  const [error,              setError]              = useState('')
+  const [locationError,      setLocationError]      = useState('')   // 保管場所専用インラインエラー
+  const [confirmed,          setConfirmed]          = useState(false)
+  const [lastConfirmedQty,   setLastConfirmedQty]   = useState<number | null>(null)
+  const [confirmedLocation,  setConfirmedLocation]  = useState('')
+
+  // 確定時に表示する location_code（selectedLocationId から逆引き）
+  const selectedLocationCode = locations.find((l) => l.id === selectedLocationId)?.code ?? ''
 
   const handleConfirm = async () => {
     const qty = Math.floor(Number(inputQty))
@@ -121,36 +136,35 @@ function ReceivingModal({
       setError(`${t('errOverflow')} (${remaining})`)
       return
     }
-    if (!currentArrival.locationId) {
-      setError('ロケーションが設定されていません。入荷データを確認してください。')
+    if (!selectedLocationId) {
+      setLocationError('保管場所を選択してください')
       return
     }
 
     setSubmitting(true)
     setError('')
+    setLocationError('')
 
     const newTotalReceived = currentArrival.receivedQty + qty
     const isComplete       = newTotalReceived >= currentArrival.plannedQty
+
+    const today = new Date()
+    const receivedDate = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-')
 
     const { error: err } = await confirmArrivalReceiving({
       lineId:           currentArrival.id,
       headerId:         currentArrival.headerId,
       productId:        currentArrival.productId,
-      locationId:       currentArrival.locationId,
+      locationId:       selectedLocationId,
       addQty:           qty,
       totalPlannedQty:  currentArrival.plannedQty,
       totalReceivedQty: newTotalReceived,
       inventoryStatus,
-      // 入庫確定日 = 処理を実行した日（ローカルタイムゾーン基準で YYYY-MM-DD）
-      // arrival_date（入荷予定日）ではなく「実際に確定した日」を保存する
-      receivedDate:     (() => {
-        const d = new Date()
-        return [
-          d.getFullYear(),
-          String(d.getMonth() + 1).padStart(2, '0'),
-          String(d.getDate()).padStart(2, '0'),
-        ].join('-')
-      })(),
+      receivedDate,
     })
 
     setSubmitting(false)
@@ -161,20 +175,18 @@ function ReceivingModal({
     }
 
     // ── 楽観的更新：DB成功後に即時反映 ────────────────────
-    const updated: ArrivalDisplay = {
+    setCurrentArrival({
       ...currentArrival,
       receivedQty: newTotalReceived,
       status:      isComplete ? 'completed' : 'partial',
-    }
-    setCurrentArrival(updated)
+    })
     setLastConfirmedQty(qty)
+    setConfirmedLocation(selectedLocationCode)
     setInputQty('')
     setInventoryStatus('available')
+    // 保管場所は連続入庫のため選択値を維持する
 
-    // 全数入庫完了 → 完了画面へ
     if (isComplete) setConfirmed(true)
-
-    // 親一覧をバックグラウンドで更新（ローダー表示なし）
     onConfirmed()
   }
 
@@ -193,7 +205,7 @@ function ReceivingModal({
           <p className="text-xs text-slate-500">{currentArrival.arrivalNo}</p>
           <p className="text-xs text-slate-400">
             {currentArrival.productCode} — {lastConfirmedQty}{currentArrival.unit} を
-            {currentArrival.locationCode} に入庫
+            {confirmedLocation} に入庫
           </p>
           <button
             onClick={onClose}
@@ -214,7 +226,6 @@ function ReceivingModal({
       size="lg"
       locked={submitting}
     >
-      {/* ── 送信中ローディングオーバーレイ ── */}
       {submitting && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-[2px] rounded-xl">
           <Loader2 size={32} className="animate-spin text-brand-navy" />
@@ -225,12 +236,12 @@ function ReceivingModal({
 
       <div className="space-y-5">
 
-        {/* ── 一部入庫完了フラッシュ（残数あり確定後に表示） ── */}
+        {/* 一部入庫完了フラッシュ */}
         {lastConfirmedQty !== null && (
           <div className="bg-green-50 border border-green-200 rounded-md px-3 py-2 flex items-center gap-2 text-xs text-green-700">
             <CheckCircle size={14} className="flex-shrink-0 text-green-500" />
             <span>
-              <strong>{lastConfirmedQty}{currentArrival.unit}</strong> を {currentArrival.locationCode} に入庫しました。
+              <strong>{lastConfirmedQty}{currentArrival.unit}</strong> を {confirmedLocation} に入庫しました。
               残り <strong>{remaining}{currentArrival.unit}</strong> です。
             </span>
           </div>
@@ -257,14 +268,13 @@ function ReceivingModal({
           </div>
         )}
 
-        {/* 商品・ロケーション詳細 */}
+        {/* 商品明細テーブル */}
         <div className="border border-slate-200 rounded-lg overflow-x-auto">
-          <table className="w-full text-xs min-w-[480px]">
+          <table className="w-full text-xs min-w-[520px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
                 <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblLocation')}</th>
                 <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblScheduled')}</th>
                 <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblReceived')}</th>
                 <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblRemaining')}</th>
@@ -279,11 +289,6 @@ function ReceivingModal({
               <tr className={remaining === 0 ? 'bg-green-50/30 opacity-70' : ''}>
                 <td className="px-4 py-3 font-mono text-blue-600">{currentArrival.productCode}</td>
                 <td className="px-4 py-3 text-slate-700">{currentArrival.productName}</td>
-                <td className="px-4 py-3 font-mono text-slate-600">
-                  {currentArrival.locationCode || (
-                    <span className="text-red-400">未設定</span>
-                  )}
-                </td>
                 <td className="px-4 py-3 text-right tabular-nums">{currentArrival.plannedQty}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-green-700 font-medium">
                   {currentArrival.receivedQty}
@@ -318,6 +323,46 @@ function ReceivingModal({
             </tbody>
           </table>
         </div>
+
+        {/* 保管場所選択 */}
+        {!isReadOnly && remaining > 0 && (
+          <div className="space-y-1">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <label className="text-xs font-medium text-slate-600 flex-shrink-0 sm:w-20">
+                {t('tblLocation')} <span className="text-red-500">*</span>
+              </label>
+              <div className="flex-1 space-y-1">
+                <select
+                  value={selectedLocationId}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    setSelectedLocationId(id)
+                    onLocationChange(id)    // 親に通知して次回選択値を保持
+                    setLocationError('')
+                    setError('')
+                  }}
+                  className={`w-full border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white ${
+                    locationError ? 'border-red-400 bg-red-50' :
+                    !selectedLocationId ? 'border-amber-300 bg-amber-50' : 'border-slate-300'
+                  }`}
+                >
+                  <option value="">— 保管場所を選択してください —</option>
+                  {locations.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.code}　{l.name}
+                    </option>
+                  ))}
+                </select>
+                {locationError && (
+                  <p className="text-[11px] text-red-600 flex items-center gap-1">
+                    <AlertCircle size={11} className="flex-shrink-0" />
+                    {locationError}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 在庫ステータス選択 */}
         {!isReadOnly && remaining > 0 && (
@@ -394,19 +439,26 @@ export default function ReceivingPage() {
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('status')
 
-  const [arrivals, setArrivals]       = useState<ArrivalDisplay[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [fetchError, setFetchError]   = useState<string | null>(null)
+  const [arrivals, setArrivals]         = useState<ArrivalDisplay[]>([])
+  const [locations, setLocations]       = useState<LocationOption[]>([])
+  // 明細 id をキーに、前回選択した保管場所 id を保持する
+  const [locationSelections, setLocationSelections] = useState<Record<string, string>>({})
+  const [loading, setLoading]           = useState(true)
+  const [fetchError, setFetchError]     = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'all' | 'active'>('active')
-  const [selected, setSelected]       = useState<ArrivalDisplay | null>(null)
+  const [selected, setSelected]         = useState<ArrivalDisplay | null>(null)
 
   // ── データ取得 ─────────────────────────────────────────────
   const loadArrivals = useCallback(async () => {
     setLoading(true)
     setFetchError(null)
-    const { data, error } = await fetchArrivals()
-    if (error) setFetchError(error)
-    else setArrivals(data)
+    const [arrivalsRes, locationsRes] = await Promise.all([
+      fetchArrivals(),
+      fetchLocationOptions(),
+    ])
+    if (arrivalsRes.error) setFetchError(arrivalsRes.error)
+    else setArrivals(arrivalsRes.data)
+    setLocations(locationsRes.data)
     setLoading(false)
   }, [])
 
@@ -633,6 +685,11 @@ export default function ReceivingPage() {
       {selected && (
         <ReceivingModal
           arrival={selected}
+          locations={locations}
+          initialLocationId={locationSelections[selected.id] ?? selected.locationId ?? ''}
+          onLocationChange={(id) =>
+            setLocationSelections((prev) => ({ ...prev, [selected.id]: id }))
+          }
           onClose={() => setSelected(null)}
           onConfirmed={handleConfirmed}
         />

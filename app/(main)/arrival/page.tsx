@@ -14,11 +14,9 @@ import {
   type ArrivalLineItem,
   type SupplierOption,
   type ProductOption,
-  type LocationOption,
   fetchArrivalGroups,
   fetchSupplierOptions,
   fetchProductOptions,
-  fetchLocationOptions,
   generateArrivalNo,
   createArrivalBatch,
 } from '@/lib/supabase/queries/arrivals'
@@ -47,28 +45,25 @@ function ArrivalStatusBadge({ status }: { status: ArrivalStatus }) {
 // =============================================================
 
 interface FormItemRow {
-  uid:         string
-  productId:   string
+  uid:          string
+  productId:    string
   scheduledQty: string
-  locationId:  string
 }
 
 type FormErrors = Partial<Record<string, string>>
 
 function emptyRow(uid: string): FormItemRow {
-  return { uid, productId: '', scheduledQty: '', locationId: '' }
+  return { uid, productId: '', scheduledQty: '' }
 }
 
 function ArrivalCreateModal({
   suppliers,
   products,
-  locations,
   onClose,
   onCreated,
 }: {
   suppliers: SupplierOption[]
   products:  ProductOption[]
-  locations: LocationOption[]
   onClose:   () => void
   onCreated: () => void
 }) {
@@ -97,9 +92,6 @@ function ArrivalCreateModal({
       if (!r.scheduledQty || isNaN(qty) || qty <= 0) {
         errs[`qty_${r.uid}`] = t('errQty')
       }
-      if (!r.locationId) {
-        errs[`loc_${r.uid}`] = t('errLocation')
-      }
     })
 
     setErrors(errs)
@@ -122,9 +114,9 @@ function ArrivalCreateModal({
         arrivalDate: scheduledDate,  // YYYY-MM-DD のまま渡す
         memo:        note.trim() || undefined,
         items: validRows.map((r) => ({
-          productId:         r.productId,
-          plannedQty:        Number(r.scheduledQty),
-          plannedLocationId: r.locationId || null,
+          productId:  r.productId,
+          plannedQty: Number(r.scheduledQty),
+          // 保管場所は入庫処理時に選択するため、ここでは設定しない
         })),
       })
 
@@ -216,10 +208,9 @@ function ArrivalCreateModal({
           <div className="border border-slate-200 rounded-lg overflow-x-auto">
             <div className="min-w-[480px]">
               {/* テーブルヘッダー */}
-              <div className="grid grid-cols-[1fr_100px_140px_32px] gap-0 bg-slate-50 border-b border-slate-200 px-3 py-2">
+              <div className="grid grid-cols-[1fr_120px_32px] gap-0 bg-slate-50 border-b border-slate-200 px-3 py-2">
                 <span className="text-xs font-medium text-slate-500">{t('product')}</span>
                 <span className="text-xs font-medium text-slate-500 text-right pr-2">{t('scheduledQty')}</span>
-                <span className="text-xs font-medium text-slate-500 pl-2">{t('location')}</span>
                 <span />
               </div>
 
@@ -230,7 +221,7 @@ function ArrivalCreateModal({
                   return (
                     <div
                       key={row.uid}
-                      className="grid grid-cols-[1fr_100px_140px_32px] gap-0 items-start px-3 py-2.5"
+                      className="grid grid-cols-[1fr_120px_32px] gap-0 items-start px-3 py-2.5"
                     >
                       {/* 商品選択 */}
                       <div className="pr-2 space-y-1">
@@ -275,25 +266,6 @@ function ArrivalCreateModal({
                         {errors[`qty_${row.uid}`] && (
                           <p className="text-[10px] text-red-500 mt-0.5">
                             {errors[`qty_${row.uid}`]}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* 保管予定場所（ドロップダウン） */}
-                      <div className="pl-2">
-                        <select
-                          value={row.locationId}
-                          onChange={(e) => updateRow(row.uid, 'locationId', e.target.value)}
-                          className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white"
-                        >
-                          <option value="">-- 選択 --</option>
-                          {locations.map((l) => (
-                            <option key={l.id} value={l.id}>{l.code}</option>
-                          ))}
-                        </select>
-                        {errors[`loc_${row.uid}`] && (
-                          <p className="text-[10px] text-red-500 mt-0.5">
-                            {errors[`loc_${row.uid}`]}
                           </p>
                         )}
                       </div>
@@ -438,7 +410,7 @@ function ArrivalDetailModal({
                     <td className="px-4 py-3 font-mono text-blue-600">{item.productCode}</td>
                     <td className="px-4 py-3 text-slate-700">{item.productName}</td>
                     <td className="px-4 py-3 font-mono text-slate-600 bg-slate-50">
-                      {item.locationCode || <span className="text-red-400">未設定</span>}
+                      {item.locationCode || <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">{item.scheduledQty}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-green-700 font-medium">
@@ -475,7 +447,6 @@ export default function ArrivalPage() {
   const [groups,       setGroups]       = useState<ArrivalGroup[]>([])
   const [suppliers,    setSuppliers]    = useState<SupplierOption[]>([])
   const [products,     setProducts]     = useState<ProductOption[]>([])
-  const [locations,    setLocations]    = useState<LocationOption[]>([])
   const [loading,      setLoading]      = useState(true)
   const [fetchError,   setFetchError]   = useState<string | null>(null)
 
@@ -489,11 +460,10 @@ export default function ArrivalPage() {
     setLoading(true)
     setFetchError(null)
 
-    const [arrivals, suppliersRes, productsRes, locationsRes] = await Promise.all([
+    const [arrivals, suppliersRes, productsRes] = await Promise.all([
       fetchArrivalGroups(),
       fetchSupplierOptions(),
       fetchProductOptions(),
-      fetchLocationOptions(),
     ])
 
     if (arrivals.error) {
@@ -503,7 +473,6 @@ export default function ArrivalPage() {
     }
     setSuppliers(suppliersRes.data)
     setProducts(productsRes.data)
-    setLocations(locationsRes.data)
     setLoading(false)
   }, [])
 
@@ -704,7 +673,6 @@ export default function ArrivalPage() {
         <ArrivalCreateModal
           suppliers={suppliers}
           products={products}
-          locations={locations}
           onClose={() => setShowCreateModal(false)}
           onCreated={handleCreated}
         />

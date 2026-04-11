@@ -35,7 +35,7 @@ type LineRaw = {
   products: { product_code: string; product_name_ja: string; unit: string } | null
 }
 
-type LocationRow = { id: string; location_code: string }
+type LocationRow = { id: string; location_code: string; location_name: string }
 
 // =============================================================
 // エクスポート型
@@ -72,7 +72,7 @@ export type ArrivalGroup = {
 /** フォーム用選択肢 */
 export type SupplierOption = { id: string; code: string; name: string }
 export type ProductOption  = { id: string; code: string; name: string; unit: string }
-export type LocationOption = { id: string; code: string }
+export type LocationOption = { id: string; code: string; name: string }
 
 // =============================================================
 // 内部ユーティリティ
@@ -253,7 +253,7 @@ export async function fetchLocationOptions(): Promise<{
 }> {
   const { data, error } = await supabase
     .from('locations')
-    .select('id, location_code')
+    .select('id, location_code, location_name')
     .eq('status', 'active')
     .order('location_code')
 
@@ -262,6 +262,7 @@ export async function fetchLocationOptions(): Promise<{
     data: (data as unknown as LocationRow[]).map((l) => ({
       id:   l.id,
       code: l.location_code,
+      name: l.location_name,
     })),
     error: null,
   }
@@ -299,9 +300,9 @@ export async function createArrivalBatch(params: {
   arrivalDate: string  // YYYY-MM-DD
   memo?:       string
   items: Array<{
-    productId:         string
-    plannedQty:        number
-    plannedLocationId: string | null
+    productId:          string
+    plannedQty:         number
+    plannedLocationId?: string | null   // 入庫処理時に選択するため省略可
   }>
 }): Promise<{ error: string | null }> {
   const { arrivalNo, supplierId, arrivalDate, memo, items } = params
