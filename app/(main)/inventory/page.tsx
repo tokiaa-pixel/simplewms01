@@ -184,7 +184,7 @@ function SummaryBar({ items }: { items: InventoryItem[] }) {
   return (
     <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs text-slate-500">
       {counts.map(({ status, count }) => {
-        const cfg = INVENTORY_STATUS_CONFIG[status]
+        const cfg = INVENTORY_STATUS_CONFIG[status] ?? FALLBACK_STATUS_CFG
         return (
           <span key={status} className="flex items-center gap-1">
             <span className={`w-2 h-2 rounded-full ${cfg.dotClass}`} />
