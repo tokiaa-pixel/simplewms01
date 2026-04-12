@@ -284,17 +284,30 @@ export interface Translations {
     itemsLabel: string
     product: string
     productPlaceholder: string
-    productHint: string
     qtyLabel: string
-    locationLabel: string
-    locationPlaceholder: string
     notePlaceholder: string
     submitBtn: string
     errCustomer: string
     errDate: string
     errItems: string
     errQty: string
-    errLocation: string
+    errNoAllocation: string
+    // 引当セクション
+    allocationSection: string
+    fifoBtn: string
+    manualBtn: string
+    resetAllocation: string
+    allocatedTotal: string
+    shortage: string
+    noStock: string
+    // 手動引当モーダル
+    manualModalTitle: string
+    manualConfirmBtn: string
+    colLocation: string
+    colAvailableQty: string
+    colReceivedDate: string
+    colAllocateQty: string
+    noInventory: string
   }
   master: {
     title: string

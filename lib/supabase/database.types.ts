@@ -247,7 +247,7 @@ export interface Database {
         }
       }
 
-      // ─── 出庫指示 ─────────────────────────────────────────────
+      // ─── 出庫指示（レガシー） ─────────────────────────────────
       shippings: {
         Row: {
           id:               string
@@ -287,6 +287,89 @@ export interface Database {
           status?:            string
           memo?:              string | null
           created_by?:        string | null
+        }
+      }
+
+      // ─── 出庫ヘッダー ─────────────────────────────────────────
+      shipping_headers: {
+        Row: {
+          id:           string
+          shipping_no:  string
+          shipping_date: string
+          customer_id:  string
+          status:       string
+          memo:         string | null
+          created_by:   string | null
+          created_at:   string
+          updated_at:   string
+        }
+        Insert: {
+          shipping_no:   string
+          shipping_date: string
+          customer_id:   string
+          status?:       string
+          memo?:         string | null
+          created_by?:   string | null
+        }
+        Update: {
+          shipping_no?:   string
+          shipping_date?: string
+          customer_id?:   string
+          status?:        string
+          memo?:          string | null
+          created_by?:    string | null
+        }
+      }
+
+      // ─── 出庫明細 ─────────────────────────────────────────────
+      shipping_lines: {
+        Row: {
+          id:            string
+          header_id:     string
+          line_no:       number
+          product_id:    string
+          requested_qty: number
+          shipped_qty:   number
+          status:        string
+          created_at:    string
+          updated_at:    string
+        }
+        Insert: {
+          header_id:     string
+          line_no:       number
+          product_id:    string
+          requested_qty: number
+          shipped_qty?:  number
+          status?:       string
+        }
+        Update: {
+          header_id?:     string
+          line_no?:       number
+          product_id?:    string
+          requested_qty?: number
+          shipped_qty?:   number
+          status?:        string
+        }
+      }
+
+      // ─── 出庫引当 ─────────────────────────────────────────────
+      shipping_allocations: {
+        Row: {
+          id:            string
+          line_id:       string
+          inventory_id:  string
+          allocated_qty: number
+          created_at:    string
+        }
+        Insert: {
+          line_id:       string
+          inventory_id:  string
+          allocated_qty: number
+        }
+        Update: {
+          line_id?:       string
+          inventory_id?:  string
+          allocated_qty?: number
         }
       }
 
