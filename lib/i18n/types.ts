@@ -308,10 +308,13 @@ export interface Translations {
     manualModalTitle: string
     manualConfirmBtn: string
     colLocation: string
+    colOnHandQty: string
+    colAllocatedQty: string
     colAvailableQty: string
     colReceivedDate: string
     colAllocateQty: string
     noInventory: string
+    errOverAvailable: string
   }
   master: {
     title: string

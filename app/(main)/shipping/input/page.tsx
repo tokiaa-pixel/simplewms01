@@ -71,14 +71,32 @@ function ManualAllocationModal({
     return m
   })
 
-  const totalAllocated = inventoryLines.reduce((sum, l) => {
-    const v = Number(qtys[l.inventoryId] ?? 0)
-    return sum + (isNaN(v) ? 0 : v)
-  }, 0)
+  // 各行の入力値を数値に安全変換（NaN → 0）
+  const parseQty = (id: string) => {
+    const v = Number(qtys[id] ?? 0)
+    return isNaN(v) ? 0 : Math.max(0, v)
+  }
+
+  // 行ごとの超過フラグ（available_qty を超えているか）
+  const isRowOverflow = (line: InventoryLine) => parseQty(line.inventoryId) > line.availableQty
+
+  // 超過している行が1行でもあるか
+  const hasRowOverflow = inventoryLines.some(isRowOverflow)
+
+  // 合計引当数
+  const totalAllocated = inventoryLines.reduce(
+    (sum, l) => sum + parseQty(l.inventoryId), 0,
+  )
+
+  // 合計超過（出庫数量を超えているか）
+  const isTotalOver = totalAllocated > requestedQty
+
+  // 確定ボタン無効条件
+  const canConfirm = totalAllocated > 0 && !isTotalOver && !hasRowOverflow
 
   const handleConfirm = () => {
     const items: AllocationItem[] = inventoryLines
-      .filter((l) => Number(qtys[l.inventoryId] ?? 0) > 0)
+      .filter((l) => parseQty(l.inventoryId) > 0)
       .map((l) => ({
         inventoryId:  l.inventoryId,
         locationId:   l.locationId,
@@ -86,7 +104,8 @@ function ManualAllocationModal({
         locationName: l.locationName,
         status:       l.status,
         availableQty: l.availableQty,
-        allocatedQty: Math.min(Number(qtys[l.inventoryId] ?? 0), l.availableQty),
+        // 安全ガード：available_qty を絶対に超えない
+        allocatedQty: Math.min(parseQty(l.inventoryId), l.availableQty),
         receivedDate: l.receivedDate,
       }))
     onConfirm(items)
@@ -99,12 +118,12 @@ function ManualAllocationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
           <div>
             <h3 className="text-sm font-semibold text-slate-800">{t('manualModalTitle')}</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{productName}　出庫数量: {requestedQty}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{productName}　出庫数量: <span className="font-semibold text-slate-700">{requestedQty}</span></p>
           </div>
           <button
             onClick={onClose}
@@ -120,50 +139,91 @@ function ManualAllocationModal({
             <p className="text-sm text-slate-400 text-center py-10">{t('noInventory')}</p>
           ) : (
             <table className="w-full text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2.5 text-left font-medium text-slate-500">{t('colLocation')}</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-500 min-w-[100px]">{t('colLocation')}</th>
                   <th className="px-3 py-2.5 text-left font-medium text-slate-500">ステータス</th>
-                  <th className="px-3 py-2.5 text-right font-medium text-slate-500">{t('colAvailableQty')}</th>
+                  {/* 数量3列 */}
+                  <th className="px-3 py-2.5 text-right font-medium text-slate-500">{t('colOnHandQty')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-amber-600">{t('colAllocatedQty')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-teal-600">{t('colAvailableQty')}</th>
                   <th className="px-3 py-2.5 text-left font-medium text-slate-500">{t('colReceivedDate')}</th>
-                  <th className="px-3 py-2.5 text-right font-medium text-slate-500 w-24">{t('colAllocateQty')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-slate-500 w-28">{t('colAllocateQty')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {inventoryLines.map((line) => {
-                  const cfg = INVENTORY_STATUS_CONFIG[line.status]
+                  const cfg      = INVENTORY_STATUS_CONFIG[line.status]
+                  const inputQty = parseQty(line.inventoryId)
+                  const overflow = isRowOverflow(line)
+
                   return (
-                    <tr key={line.inventoryId} className="hover:bg-slate-50/60">
+                    <tr
+                      key={line.inventoryId}
+                      className={`transition-colors ${overflow ? 'bg-red-50' : 'hover:bg-slate-50/60'}`}
+                    >
+                      {/* 保管場所 */}
                       <td className="px-3 py-2.5">
-                        <span className="font-mono">{line.locationCode}</span>
+                        <span className="font-mono font-medium text-slate-800">{line.locationCode}</span>
                         {line.locationName && (
-                          <span className="text-slate-400 ml-1.5">{line.locationName}</span>
+                          <span className="text-slate-400 ml-1.5 text-[10px]">{line.locationName}</span>
                         )}
                       </td>
+
+                      {/* ステータス */}
                       <td className="px-3 py-2.5">
                         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${cfg.badgeClass}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
                           {cfg.label}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
-                        {line.availableQty}
+
+                      {/* 総数 */}
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-600">
+                        {line.onHandQty ?? 0}
                       </td>
-                      <td className="px-3 py-2.5 text-slate-500">
+
+                      {/* 引当済 */}
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                        <span className={line.allocatedQty > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'}>
+                          {line.allocatedQty ?? 0}
+                        </span>
+                      </td>
+
+                      {/* 引当可能 */}
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                        <span className="text-teal-600 font-semibold">{line.availableQty}</span>
+                      </td>
+
+                      {/* 入庫日 */}
+                      <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">
                         {formatDate(line.receivedDate)}
                       </td>
+
+                      {/* 引当数入力 */}
                       <td className="px-3 py-2.5">
-                        <input
-                          type="number"
-                          min="0"
-                          max={line.availableQty}
-                          value={qtys[line.inventoryId] ?? ''}
-                          onChange={(e) =>
-                            setQtys((prev) => ({ ...prev, [line.inventoryId]: e.target.value }))
-                          }
-                          placeholder="0"
-                          className="w-full border border-slate-300 rounded px-2 py-1 text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal"
-                        />
+                        <div>
+                          <input
+                            type="number"
+                            min="0"
+                            max={line.availableQty}
+                            value={qtys[line.inventoryId] ?? ''}
+                            onChange={(e) =>
+                              setQtys((prev) => ({ ...prev, [line.inventoryId]: e.target.value }))
+                            }
+                            placeholder="0"
+                            className={`w-full border rounded px-2 py-1 text-right font-mono focus:outline-none focus:ring-2 ${
+                              overflow
+                                ? 'border-red-400 bg-red-50 focus:ring-red-300 text-red-700'
+                                : 'border-slate-300 focus:ring-brand-teal'
+                            }`}
+                          />
+                          {overflow && (
+                            <p className="text-[10px] text-red-500 mt-0.5 text-right">
+                              {t('errOverAvailable')} (max {line.availableQty})
+                            </p>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -174,15 +234,32 @@ function ManualAllocationModal({
         </div>
 
         {/* フッター */}
-        <div className="px-5 py-4 border-t border-slate-200 flex items-center justify-between gap-4">
-          <div className="text-xs text-slate-600">
-            {t('allocatedTotal')}: <span className={`font-semibold tabular-nums ${totalAllocated > requestedQty ? 'text-red-600' : ''}`}>{totalAllocated}</span>
-            <span className="text-slate-400"> / {requestedQty}</span>
-            {totalAllocated > requestedQty && (
-              <span className="ml-1.5 text-red-600">（超過）</span>
+        <div className="px-5 py-3.5 border-t border-slate-200 flex items-center justify-between gap-4">
+          {/* 合計サマリ */}
+          <div className="flex items-center gap-3 text-xs text-slate-600">
+            <span>
+              {t('allocatedTotal')}:&nbsp;
+              <span className={`font-semibold tabular-nums ${isTotalOver ? 'text-red-600' : 'text-slate-800'}`}>
+                {totalAllocated}
+              </span>
+              <span className="text-slate-400"> / {requestedQty}</span>
+            </span>
+            {isTotalOver && (
+              <span className="flex items-center gap-0.5 text-red-600">
+                <AlertCircle size={11} />
+                出庫数量を超えています
+              </span>
+            )}
+            {hasRowOverflow && !isTotalOver && (
+              <span className="flex items-center gap-0.5 text-red-600">
+                <AlertCircle size={11} />
+                引当可能数を超えている行があります
+              </span>
             )}
           </div>
-          <div className="flex gap-2">
+
+          {/* ボタン */}
+          <div className="flex gap-2 flex-shrink-0">
             <button
               onClick={onClose}
               className="px-3 py-1.5 text-xs border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
@@ -191,7 +268,7 @@ function ManualAllocationModal({
             </button>
             <button
               onClick={handleConfirm}
-              disabled={totalAllocated === 0 || totalAllocated > requestedQty}
+              disabled={!canConfirm}
               className="px-3 py-1.5 text-xs bg-brand-navy text-white rounded-md hover:bg-brand-navy-mid disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium"
             >
               {t('manualConfirmBtn')}

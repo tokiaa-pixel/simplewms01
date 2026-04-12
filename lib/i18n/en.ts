@@ -311,10 +311,13 @@ export const en: Translations = {
     manualModalTitle:   'Manual Allocation',
     manualConfirmBtn:   'Confirm Allocation',
     colLocation:        'Location',
+    colOnHandQty:       'On Hand',
+    colAllocatedQty:    'Allocated',
     colAvailableQty:    'Available',
     colReceivedDate:    'Received Date',
     colAllocateQty:     'Allocate Qty',
     noInventory:        'No allocatable inventory found',
+    errOverAvailable:   'Exceeds available quantity',
   },
 
   master: {

@@ -311,10 +311,13 @@ export const ja: Translations = {
     manualModalTitle:   '手動引当',
     manualConfirmBtn:   '引当を確定',
     colLocation:        '保管場所',
-    colAvailableQty:    '在庫数',
+    colOnHandQty:       '総数',
+    colAllocatedQty:    '引当済',
+    colAvailableQty:    '引当可能',
     colReceivedDate:    '入庫日',
     colAllocateQty:     '引当数',
     noInventory:        '引き当て可能な在庫がありません',
+    errOverAvailable:   '引当可能数を超えています',
   },
 
   master: {
