@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/store/AuthContext'
 import { WmsProvider } from '@/store/WmsContext'
+import { TenantProvider } from '@/store/TenantContext'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 
@@ -33,6 +34,7 @@ export default function MainLayout({
   if (!user) return null
 
   return (
+    <TenantProvider>
     <WmsProvider>
       <div className="flex h-screen overflow-hidden bg-slate-100">
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -42,5 +44,6 @@ export default function MainLayout({
         </div>
       </div>
     </WmsProvider>
+    </TenantProvider>
   )
 }

@@ -29,6 +29,8 @@ import {
   completeShippingInspection,
   confirmShippingOrder,
 } from '@/lib/supabase/queries/shippings'
+import { useTenant } from '@/store/TenantContext'
+import ScopeRequired from '@/components/ui/ScopeRequired'
 
 // =============================================================
 // ローカル型（モーダル用）
@@ -546,6 +548,7 @@ export default function ShippingPage() {
   const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('status')
+  const { scope } = useTenant()
 
   // ── データ ───────────────────────────────────────────────────
   const [orders,     setOrders]     = useState<ShippingOrderDetail[]>([])
@@ -561,13 +564,14 @@ export default function ShippingPage() {
 
   // ── 一覧取得 ─────────────────────────────────────────────────
   const loadOrders = useCallback(async () => {
-    const { data, error } = await fetchShippingOrders()
+    if (!scope) { setLoading(false); return }
+    const { data, error } = await fetchShippingOrders(scope)
     if (error) { setFetchError(error); return }
     // ShippingOrderSummary → ShippingOrderDetail（items 未ロード）
     setOrders(
       data.map((s) => ({ ...s, items: [], itemsLoaded: false }))
     )
-  }, [])
+  }, [scope])
 
   useEffect(() => {
     setLoading(true)
@@ -656,6 +660,9 @@ export default function ShippingPage() {
   }
 
   const selectedOrder = selectedId ? orders.find((o) => o.id === selectedId) ?? null : null
+
+  // ── スコープ未選択 ───────────────────────────────────────────
+  if (!scope) return <ScopeRequired />
 
   // ── ローディング ─────────────────────────────────────────────
   if (loading) {

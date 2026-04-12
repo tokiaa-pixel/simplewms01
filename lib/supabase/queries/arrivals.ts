@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client'
-import type { ArrivalStatus } from '@/lib/types'
+import type { ArrivalStatus, QueryScope } from '@/lib/types'
 
 // Supabase typed client が DML の Insert/Update 型を never に解決するため、
 // INSERT / UPDATE のみ any キャストで回避する。SELECT は typed client を使用。
@@ -116,7 +116,7 @@ function formatDate(raw: string): string {
 // 入荷予定グループ一覧取得
 // =============================================================
 
-export async function fetchArrivalGroups(): Promise<{
+export async function fetchArrivalGroups(scope: QueryScope): Promise<{
   data:  ArrivalGroup[]
   error: string | null
 }> {
@@ -132,6 +132,8 @@ export async function fetchArrivalGroups(): Promise<{
         products ( product_code, product_name_ja, unit )
       )
     `)
+    .eq('tenant_id',    scope.tenantId)
+    .eq('warehouse_id', scope.warehouseId)
     .order('arrival_date', { ascending: false })
 
   if (error) return { data: [], error: error.message }
@@ -202,13 +204,14 @@ export async function fetchArrivalGroups(): Promise<{
 // フォーム用マスタ選択肢取得
 // =============================================================
 
-export async function fetchSupplierOptions(): Promise<{
+export async function fetchSupplierOptions(tenantId: string): Promise<{
   data:  SupplierOption[]
   error: string | null
 }> {
   const { data, error } = await supabase
     .from('suppliers')
     .select('id, supplier_code, supplier_name_ja')
+    .eq('tenant_id', tenantId)
     .eq('status', 'active')
     .order('supplier_code')
 
@@ -224,13 +227,14 @@ export async function fetchSupplierOptions(): Promise<{
   }
 }
 
-export async function fetchProductOptions(): Promise<{
+export async function fetchProductOptions(tenantId: string): Promise<{
   data:  ProductOption[]
   error: string | null
 }> {
   const { data, error } = await supabase
     .from('products')
     .select('id, product_code, product_name_ja, unit')
+    .eq('tenant_id', tenantId)
     .eq('status', 'active')
     .order('product_code')
 
@@ -247,13 +251,14 @@ export async function fetchProductOptions(): Promise<{
   }
 }
 
-export async function fetchLocationOptions(): Promise<{
+export async function fetchLocationOptions(warehouseId: string): Promise<{
   data:  LocationOption[]
   error: string | null
 }> {
   const { data, error } = await supabase
     .from('locations')
     .select('id, location_code, location_name')
+    .eq('warehouse_id', warehouseId)
     .eq('status', 'active')
     .order('location_code')
 
@@ -272,13 +277,14 @@ export async function fetchLocationOptions(): Promise<{
 // 入荷予定番号の自動採番（arrival_headers から最新を取得）
 // =============================================================
 
-export async function generateArrivalNo(): Promise<string> {
+export async function generateArrivalNo(scope: QueryScope): Promise<string> {
   const year   = new Date().getFullYear()
   const prefix = `ARR-${year}-`
 
   const { data } = await supabase
     .from('arrival_headers')
     .select('arrival_no')
+    .eq('tenant_id', scope.tenantId)
     .like('arrival_no', `${prefix}%`)
     .order('arrival_no', { ascending: false })
     .limit(1)
@@ -299,13 +305,14 @@ export async function createArrivalBatch(params: {
   supplierId:  string
   arrivalDate: string  // YYYY-MM-DD
   memo?:       string
+  scope:       QueryScope
   items: Array<{
     productId:          string
     plannedQty:         number
     plannedLocationId?: string | null   // 入庫処理時に選択するため省略可
   }>
 }): Promise<{ error: string | null }> {
-  const { arrivalNo, supplierId, arrivalDate, memo, items } = params
+  const { arrivalNo, supplierId, arrivalDate, memo, scope, items } = params
 
   // ── Step 1: arrival_headers を INSERT して id を取得 ──────
   const { data: headerData, error: headerErr } = await dml('arrival_headers')
@@ -315,6 +322,8 @@ export async function createArrivalBatch(params: {
       arrival_date: arrivalDate,
       status:       'planned',
       memo:         memo ?? null,
+      tenant_id:    scope.tenantId,
+      warehouse_id: scope.warehouseId,
     })
     .select('id')
     .single()
@@ -332,6 +341,8 @@ export async function createArrivalBatch(params: {
     received_qty:         0,
     planned_location_id:  item.plannedLocationId ?? null,
     status:               'planned',
+    tenant_id:            scope.tenantId,
+    warehouse_id:         scope.warehouseId,
   }))
 
   const { error: linesErr } = await dml('arrival_lines').insert(lines)

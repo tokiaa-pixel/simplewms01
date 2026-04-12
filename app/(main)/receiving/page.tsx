@@ -19,6 +19,8 @@ import {
   type LocationOption,
   fetchLocationOptions,
 } from '@/lib/supabase/queries/arrivals'
+import { useTenant } from '@/store/TenantContext'
+import ScopeRequired from '@/components/ui/ScopeRequired'
 
 // =============================================================
 // ユーティリティ
@@ -104,6 +106,7 @@ function ReceivingModal({
 }) {
   const { t }  = useTranslation('receiving')
   const { t: tc } = useTranslation('common')
+  const { scope } = useTenant()
 
   // ── ローカル state（楽観的更新で即時反映） ────────────────
   const [currentArrival, setCurrentArrival] = useState<ArrivalDisplay>(arrival)
@@ -155,6 +158,8 @@ function ReceivingModal({
       String(today.getDate()).padStart(2, '0'),
     ].join('-')
 
+    if (!scope) { setSubmitting(false); return }
+
     const { error: err } = await confirmArrivalReceiving({
       lineId:           currentArrival.id,
       headerId:         currentArrival.headerId,
@@ -165,6 +170,7 @@ function ReceivingModal({
       totalReceivedQty: newTotalReceived,
       inventoryStatus,
       receivedDate,
+      scope,
     })
 
     setSubmitting(false)
@@ -438,6 +444,7 @@ export default function ReceivingPage() {
   const { t }  = useTranslation('receiving')
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('status')
+  const { scope } = useTenant()
 
   const [arrivals, setArrivals]         = useState<ArrivalDisplay[]>([])
   const [locations, setLocations]       = useState<LocationOption[]>([])
@@ -450,17 +457,18 @@ export default function ReceivingPage() {
 
   // ── データ取得 ─────────────────────────────────────────────
   const loadArrivals = useCallback(async () => {
+    if (!scope) { setLoading(false); return }
     setLoading(true)
     setFetchError(null)
     const [arrivalsRes, locationsRes] = await Promise.all([
-      fetchArrivals(),
-      fetchLocationOptions(),
+      fetchArrivals(scope),
+      fetchLocationOptions(scope.warehouseId),
     ])
     if (arrivalsRes.error) setFetchError(arrivalsRes.error)
     else setArrivals(arrivalsRes.data)
     setLocations(locationsRes.data)
     setLoading(false)
-  }, [])
+  }, [scope])
 
   useEffect(() => {
     loadArrivals()
@@ -468,9 +476,10 @@ export default function ReceivingPage() {
 
   // 確定後のバックグラウンド更新（ローダー表示なし・selected は維持）
   const handleConfirmed = useCallback(async () => {
-    const { data, error } = await fetchArrivals()
+    if (!scope) return
+    const { data, error } = await fetchArrivals(scope)
     if (!error) setArrivals(data)
-  }, [])
+  }, [scope])
 
   const statusFilterOptions = [
     { value: 'all'       as const, label: t('filterAll') },
@@ -492,6 +501,9 @@ export default function ReceivingPage() {
     pending: arrivals.filter((a) => a.status === 'pending').length,
     partial: arrivals.filter((a) => a.status === 'partial').length,
   }), [arrivals])
+
+  // ── スコープ未選択 ───────────────────────────────────────
+  if (!scope) return <ScopeRequired />
 
   // ── ローディング ─────────────────────────────────────────
   if (loading) {

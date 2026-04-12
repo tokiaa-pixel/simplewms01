@@ -20,6 +20,8 @@ import {
   generateArrivalNo,
   createArrivalBatch,
 } from '@/lib/supabase/queries/arrivals'
+import { useTenant } from '@/store/TenantContext'
+import ScopeRequired from '@/components/ui/ScopeRequired'
 import { todayIso } from '@/lib/utils'
 
 // =============================================================
@@ -78,6 +80,7 @@ function ArrivalCreateModal({
   const [errors,         setErrors]         = useState<FormErrors>({})
   const [submitting,     setSubmitting]     = useState(false)
   const [submitError,    setSubmitError]    = useState('')
+  const { scope } = useTenant()
 
   const validate = (): boolean => {
     const errs: FormErrors = {}
@@ -105,7 +108,8 @@ function ArrivalCreateModal({
     setSubmitError('')
 
     try {
-      const arrivalNo = await generateArrivalNo()
+      if (!scope) { setSubmitError('荷主・倉庫が選択されていません'); setSubmitting(false); return }
+      const arrivalNo = await generateArrivalNo(scope)
       const validRows = rows.filter((r) => r.productId)
 
       const { error } = await createArrivalBatch({
@@ -113,6 +117,7 @@ function ArrivalCreateModal({
         supplierId,
         arrivalDate: scheduledDate,  // YYYY-MM-DD のまま渡す
         memo:        note.trim() || undefined,
+        scope,
         items: validRows.map((r) => ({
           productId:  r.productId,
           plannedQty: Number(r.scheduledQty),
@@ -443,6 +448,7 @@ function ArrivalDetailModal({
 export default function ArrivalPage() {
   const { t }  = useTranslation('arrival')
   const { t: tc } = useTranslation('common')
+  const { scope } = useTenant()
 
   const [groups,       setGroups]       = useState<ArrivalGroup[]>([])
   const [suppliers,    setSuppliers]    = useState<SupplierOption[]>([])
@@ -457,13 +463,14 @@ export default function ArrivalPage() {
 
   // ── データ取得 ─────────────────────────────────────────────
   const loadAll = useCallback(async () => {
+    if (!scope) { setLoading(false); return }
     setLoading(true)
     setFetchError(null)
 
     const [arrivals, suppliersRes, productsRes] = await Promise.all([
-      fetchArrivalGroups(),
-      fetchSupplierOptions(),
-      fetchProductOptions(),
+      fetchArrivalGroups(scope),
+      fetchSupplierOptions(scope.tenantId),
+      fetchProductOptions(scope.tenantId),
     ])
 
     if (arrivals.error) {
@@ -474,7 +481,7 @@ export default function ArrivalPage() {
     setSuppliers(suppliersRes.data)
     setProducts(productsRes.data)
     setLoading(false)
-  }, [])
+  }, [scope])
 
   useEffect(() => {
     loadAll()
@@ -482,9 +489,10 @@ export default function ArrivalPage() {
 
   // 登録後は一覧をバックグラウンド再取得（ローダー表示なし）
   const handleCreated = useCallback(async () => {
-    const { data, error } = await fetchArrivalGroups()
+    if (!scope) return
+    const { data, error } = await fetchArrivalGroups(scope)
     if (!error) setGroups(data)
-  }, [])
+  }, [scope])
 
   const statusFilterOptions: { value: ArrivalStatus | 'all'; label: string }[] = [
     { value: 'all',       label: t('filterAll') },
@@ -505,6 +513,8 @@ export default function ArrivalPage() {
       return matchSearch && matchStatus
     })
   }, [groups, search, statusFilter])
+
+  if (!scope) return <ScopeRequired />
 
   // ── ローディング ─────────────────────────────────────────
   if (loading) {

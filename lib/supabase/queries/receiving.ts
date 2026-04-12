@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client'
-import type { ArrivalStatus, InventoryStatus } from '@/lib/types'
+import type { ArrivalStatus, InventoryStatus, QueryScope } from '@/lib/types'
 import { deriveHeaderStatus } from './arrivals'
 
 // Supabase typed client が DML の Insert/Update 型を never に解決するため、
@@ -87,7 +87,7 @@ function formatDate(raw: string): string {
 // 入庫対象明細一覧取得（arrival_lines ベース）
 // =============================================================
 
-export async function fetchArrivals(): Promise<{
+export async function fetchArrivals(scope: QueryScope): Promise<{
   data:  ArrivalDisplay[]
   error: string | null
 }> {
@@ -103,6 +103,8 @@ export async function fetchArrivals(): Promise<{
         suppliers ( supplier_name_ja )
       )
     `)
+    .eq('tenant_id',    scope.tenantId)
+    .eq('warehouse_id', scope.warehouseId)
     .neq('status', 'cancelled')
 
   if (error) return { data: [], error: error.message }
@@ -177,8 +179,9 @@ export async function confirmArrivalReceiving(params: {
   totalReceivedQty: number   // 今回分を加えた後の累積値
   inventoryStatus:  InventoryStatus  // 入庫確定時の在庫ステータス
   receivedDate:     string   // 入庫確定日 YYYY-MM-DD（入庫処理を実行した日。arrival_date ではない）
+  scope:            QueryScope
 }): Promise<{ error: string | null }> {
-  const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty, inventoryStatus, receivedDate } = params
+  const { lineId, headerId, productId, locationId, addQty, totalPlannedQty, totalReceivedQty, inventoryStatus, receivedDate, scope } = params
 
   if (addQty <= 0)  return { error: '入庫数量は1以上を指定してください' }
   if (!locationId)  return { error: 'ロケーションが設定されていません' }
@@ -219,6 +222,8 @@ export async function confirmArrivalReceiving(params: {
           allocated_qty: 0,
           status:        inventoryStatus,
           received_date: receivedDate || null,
+          tenant_id:     scope.tenantId,
+          warehouse_id:  scope.warehouseId,
         })
 
       if (insertErr) throw new Error(`在庫登録エラー: ${insertErr.message}`)

@@ -1,3 +1,27 @@
+// ─── マルチテナント ───────────────────────────────────────────
+
+/** 全クエリに渡す荷主×倉庫スコープ */
+export type QueryScope = {
+  tenantId:    string
+  warehouseId: string
+}
+
+export interface Tenant {
+  id:     string
+  code:   string
+  name:   string
+  status: 'active' | 'inactive'
+}
+
+export interface Warehouse {
+  id:        string
+  tenantId:  string
+  code:      string
+  name:      string
+  address?:  string
+  status:    'active' | 'inactive'
+}
+
 // ─── 在庫ステータス ───────────────────────────────────────────
 // inventory.status の DB 値と 1:1 対応（変換マッピング不要）
 

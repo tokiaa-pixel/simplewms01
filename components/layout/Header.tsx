@@ -2,8 +2,9 @@
 
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/store/AuthContext'
+import { useTenant } from '@/store/TenantContext'
 import { useTranslation } from '@/lib/i18n'
-import { LogOut, ChevronRight, UserCircle2, Menu } from 'lucide-react'
+import { LogOut, ChevronRight, UserCircle2, Menu, Building2, Warehouse } from 'lucide-react'
 import LanguageSwitcher from './LanguageSwitcher'
 
 const PAGE_KEYS: Record<string, { titleKey: string; parentKey?: string }> = {
@@ -28,6 +29,11 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const router = useRouter()
   const { t: tn } = useTranslation('nav')
   const { t: th } = useTranslation('header')
+  const {
+    currentTenant, currentWarehouse,
+    availableTenants, availableWarehouses,
+    setTenant, setWarehouse,
+  } = useTenant()
 
   const meta = PAGE_KEYS[pathname]
   const pageTitle  = meta ? tn(meta.titleKey.replace('nav.', '') as Parameters<typeof tn>[0]) : 'SimpleWMS'
@@ -71,6 +77,52 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
           )}
           <h1 className="text-sm font-semibold text-slate-800 truncate">{pageTitle}</h1>
         </div>
+
+        {/* 荷主・倉庫切替 */}
+        {availableTenants.length > 0 && (
+          <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+            {/* 荷主 */}
+            <div className="flex items-center gap-1.5">
+              <Building2 size={13} className="text-slate-400 flex-shrink-0" />
+              <select
+                value={currentTenant?.id ?? ''}
+                onChange={(e) => {
+                  const t = availableTenants.find((t) => t.id === e.target.value)
+                  if (t) setTenant(t)
+                }}
+                className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-teal max-w-[140px] truncate"
+              >
+                {availableTenants.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <span className="text-slate-200">/</span>
+
+            {/* 倉庫 */}
+            <div className="flex items-center gap-1.5">
+              <Warehouse size={13} className="text-slate-400 flex-shrink-0" />
+              <select
+                value={currentWarehouse?.id ?? ''}
+                onChange={(e) => {
+                  const w = availableWarehouses.find((w) => w.id === e.target.value)
+                  if (w) setWarehouse(w)
+                }}
+                disabled={availableWarehouses.length === 0}
+                className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-teal max-w-[140px] truncate disabled:opacity-40"
+              >
+                {availableWarehouses.length === 0 ? (
+                  <option value="">{th('warehousePlaceholder')}</option>
+                ) : (
+                  availableWarehouses.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+        )}
 
         {/* 言語切替 */}
         <LanguageSwitcher />

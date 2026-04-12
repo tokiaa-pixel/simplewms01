@@ -12,6 +12,8 @@ import {
   changeInventoryStatus,
   type LocationOption,
 } from '@/lib/supabase/queries/inventory'
+import { useTenant } from '@/store/TenantContext'
+import ScopeRequired from '@/components/ui/ScopeRequired'
 import { useTranslation } from '@/lib/i18n'
 import {
   type InventoryItem,
@@ -222,6 +224,7 @@ function InventoryInfoCard({ item }: { item: InventoryItem }) {
 // ─── 在庫移動モーダル ──────────────────────────────────────────
 
 function MoveInventoryModal({ item, onSuccess, onClose }: OperationModalProps) {
+  const { scope } = useTenant()
   const [locations,   setLocations]   = useState<LocationOption[]>([])
   const [locLoading,  setLocLoading]  = useState(true)
   const [destLocId,   setDestLocId]   = useState('')
@@ -230,11 +233,12 @@ function MoveInventoryModal({ item, onSuccess, onClose }: OperationModalProps) {
   const [error,       setError]       = useState('')
 
   useEffect(() => {
-    fetchLocationOptions().then(({ data }) => {
+    if (!scope) { setLocLoading(false); return }
+    fetchLocationOptions(scope.warehouseId).then(({ data }) => {
       setLocations(data)
       setLocLoading(false)
     })
-  }, [])
+  }, [scope])
 
   // 移動元ロケーションを除外
   const destOptions = locations.filter((l) => l.id !== item.locationId)
@@ -656,6 +660,7 @@ export default function InventoryPage() {
   const { t } = useTranslation('inventory')
   const { t: ts } = useTranslation('status')
   const { t: tc } = useTranslation('common')
+  const { scope } = useTenant()
 
   const [inventoryData, setInventoryData] = useState<InventoryItem[]>([])
   const [loading, setLoading]             = useState(true)
@@ -671,10 +676,11 @@ export default function InventoryPage() {
   const handleOperationSuccess = useCallback(() => {
     setActionItem(null)
     setActionType(null)
-    fetchInventory().then(({ data, error }) => {
+    if (!scope) return
+    fetchInventory(scope).then(({ data, error }) => {
       if (!error) setInventoryData(data)
     })
-  }, [])
+  }, [scope])
 
   const handleOperationClose = useCallback(() => {
     setActionItem(null)
@@ -682,16 +688,17 @@ export default function InventoryPage() {
   }, [])
 
   useEffect(() => {
+    if (!scope) { setLoading(false); return }
     let cancelled = false
     setLoading(true)
-    fetchInventory().then(({ data, error }) => {
+    fetchInventory(scope).then(({ data, error }) => {
       if (cancelled) return
       if (error) setFetchError(error)
       else setInventoryData(data)
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [])
+  }, [scope])
 
   const statusOptions: { value: InventoryStatus | 'all'; label: string }[] = [
     { value: 'all',       label: tc('all') },
@@ -713,6 +720,8 @@ export default function InventoryPage() {
       return matchSearch && matchStatus
     })
   }, [inventoryData, search, statusFilter])
+
+  if (!scope) return <ScopeRequired />
 
   // ─── ローディング ─────────────────────────────────────────────
   if (loading) {

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client'
-import type { InventoryItem, InventoryStatus } from '@/lib/types'
+import type { InventoryItem, InventoryStatus, QueryScope } from '@/lib/types'
 
 // INSERT / UPDATE は typed client が never を返すため any キャストで回避
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,7 +78,7 @@ function toInventoryItem(row: InventoryRow): InventoryItem {
 
 // ─── 在庫一覧を全件取得 ───────────────────────────────────────
 
-export async function fetchInventory(): Promise<{
+export async function fetchInventory(scope: QueryScope): Promise<{
   data:  InventoryItem[]
   error: string | null
 }> {
@@ -89,6 +89,8 @@ export async function fetchInventory(): Promise<{
       products  ( product_code, product_name_ja, category, unit ),
       locations ( location_code )
     `)
+    .eq('tenant_id',    scope.tenantId)
+    .eq('warehouse_id', scope.warehouseId)
     // 入庫日昇順（古い在庫が先頭＝FIFO 視点での表示順）。nulls last
     .order('received_date', { ascending: true, nullsFirst: false })
     .order('updated_at',    { ascending: false })
@@ -109,13 +111,14 @@ export type LocationOption = { id: string; code: string; name: string }
 
 type LocationRaw = { id: string; location_code: string; location_name: string | null }
 
-export async function fetchLocationOptions(): Promise<{
+export async function fetchLocationOptions(warehouseId: string): Promise<{
   data:  LocationOption[]
   error: string | null
 }> {
   const { data, error } = await supabase
     .from('locations')
     .select('id, location_code, location_name')
+    .eq('warehouse_id', warehouseId)
     .order('location_code')
 
   if (error) return { data: [], error: error.message }

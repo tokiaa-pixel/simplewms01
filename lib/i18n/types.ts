@@ -48,6 +48,12 @@ export interface Translations {
     roleAdmin: string
     roleManager: string
     roleOperator: string
+    tenant: string
+    tenantPlaceholder: string
+    warehouse: string
+    warehousePlaceholder: string
+    noScopeTitle: string
+    noScopeDesc: string
   }
   login: {
     brandSubtitle: string

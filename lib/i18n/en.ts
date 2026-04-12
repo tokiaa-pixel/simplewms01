@@ -41,11 +41,17 @@ export const en: Translations = {
   },
 
   header: {
-    menuOpen:    'Open menu',
-    logout:      'Logout',
-    roleAdmin:   'Admin',
-    roleManager: 'Manager',
-    roleOperator:'Operator',
+    menuOpen:             'Open menu',
+    logout:               'Logout',
+    roleAdmin:            'Admin',
+    roleManager:          'Manager',
+    roleOperator:         'Operator',
+    tenant:               'Client',
+    tenantPlaceholder:    'Select client...',
+    warehouse:            'Warehouse',
+    warehousePlaceholder: 'Select warehouse...',
+    noScopeTitle:         'Select a client and warehouse',
+    noScopeDesc:          'Please select a client and warehouse from the header to begin.',
   },
 
   login: {

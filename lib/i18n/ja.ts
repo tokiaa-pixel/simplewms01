@@ -41,11 +41,17 @@ export const ja: Translations = {
   },
 
   header: {
-    menuOpen:    'メニューを開く',
-    logout:      'ログアウト',
-    roleAdmin:   '管理者',
-    roleManager: 'マネージャー',
-    roleOperator:'担当者',
+    menuOpen:             'メニューを開く',
+    logout:               'ログアウト',
+    roleAdmin:            '管理者',
+    roleManager:          'マネージャー',
+    roleOperator:         '担当者',
+    tenant:               '荷主',
+    tenantPlaceholder:    '荷主を選択...',
+    warehouse:            '倉庫',
+    warehousePlaceholder: '倉庫を選択...',
+    noScopeTitle:         '荷主・倉庫を選択してください',
+    noScopeDesc:          '操作を開始するには、画面上部から荷主と倉庫を選択してください。',
   },
 
   login: {

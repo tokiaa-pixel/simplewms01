@@ -9,6 +9,8 @@ import {
 import { useTranslation } from '@/lib/i18n'
 import type { Translations } from '@/lib/i18n/types'
 import { INVENTORY_STATUS_CONFIG } from '@/lib/types'
+import { useTenant } from '@/store/TenantContext'
+import ScopeRequired from '@/components/ui/ScopeRequired'
 
 type TShipping = (key: keyof Translations['shippingInput']) => string
 type TCommon   = (key: keyof Translations['common'])         => string
@@ -494,6 +496,7 @@ export default function ShippingInputPage() {
   const { t: tc } = useTranslation('common')
   const router = useRouter()
   const uid    = useId()
+  const { scope } = useTenant()
 
   // ── マスタデータ ──────────────────────────────────────────
   const [customers, setCustomers] = useState<CustomerOption[]>([])
@@ -522,17 +525,18 @@ export default function ShippingInputPage() {
 
   // ── 初期データ読み込み（出庫指示番号の採番も並列で実行） ──────
   useEffect(() => {
+    if (!scope) { setLoading(false); return }
     Promise.all([
-      fetchCustomerOptions(),
-      fetchShipProductOptions(),
-      generateShippingNo(),
+      fetchCustomerOptions(scope.tenantId),
+      fetchShipProductOptions(scope.tenantId),
+      generateShippingNo(scope),
     ]).then(([cust, prod, no]) => {
       if (cust.data) setCustomers(cust.data)
       if (prod.data) setProducts(prod.data)
       setShippingNo(no)
       setLoading(false)
     })
-  }, [])
+  }, [scope])
 
   // ── ライン操作 ────────────────────────────────────────────
   const updateLine = useCallback((uid: string, patch: Partial<LineState>) => {
@@ -560,7 +564,8 @@ export default function ShippingInputPage() {
     const qty = Number(line.requestedQty)
     if (!qty || qty <= 0) return
 
-    const { data, error } = await fetchInventoryForProduct(line.productId)
+    if (!scope) return
+    const { data, error } = await fetchInventoryForProduct(line.productId, scope)
     if (error || !data) return
 
     // available 在庫がゼロの場合（hold / damaged は除外済みのため在庫なし扱い）
@@ -581,7 +586,7 @@ export default function ShippingInputPage() {
 
     setManualUid(uid)
     setManualLoading(true)
-    const { data } = await fetchInventoryForManualAllocation(line.productId)
+    const { data } = await fetchInventoryForManualAllocation(line.productId, scope ?? { tenantId: '', warehouseId: '' })
     setManualInventory(data ?? [])
     setManualLoading(false)
   }, [lines])
@@ -597,9 +602,9 @@ export default function ShippingInputPage() {
   // ── 出庫指示番号の重複チェック（blur時） ─────────────────────
   const handleShippingNoBlur = async () => {
     const no = shippingNo.trim()
-    if (!no) return
+    if (!no || !scope) return
     setShippingNoChecking(true)
-    const exists = await checkShippingNoExists(no)
+    const exists = await checkShippingNoExists(no, scope.tenantId)
     setShippingNoChecking(false)
     if (exists) {
       setErrors((prev) => ({ ...prev, shippingNo: t('errShippingNoDup') }))
@@ -639,11 +644,11 @@ export default function ShippingInputPage() {
 
   // ── 登録 ─────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!validate()) return
+    if (!validate() || !scope) return
     setSubmitting(true)
 
     // submit 直前にも重複チェック（フォームを離れずに送信した場合の安全網）
-    const dupExists = await checkShippingNoExists(shippingNo.trim())
+    const dupExists = await checkShippingNoExists(shippingNo.trim(), scope.tenantId)
     if (dupExists) {
       setErrors((prev) => ({ ...prev, shippingNo: t('errShippingNoDup') }))
       setSubmitting(false)
@@ -666,6 +671,7 @@ export default function ShippingInputPage() {
           allocatedQty: a.allocatedQty,
         })),
       })),
+      scope,
     })
 
     setSubmitting(false)
@@ -678,6 +684,9 @@ export default function ShippingInputPage() {
     setNewCode(shippingNo)
     setSubmitted(true)
   }
+
+  // ── スコープ未選択 ───────────────────────────────────────
+  if (!scope) return <ScopeRequired />
 
   // ── 登録完了画面 ─────────────────────────────────────────
   if (submitted) {
@@ -702,8 +711,10 @@ export default function ShippingInputPage() {
                 setErrors({})
                 setSubmitted(false)
                 // 次の出庫指示番号を採番して自動セット
-                const nextNo = await generateShippingNo()
-                setShippingNo(nextNo)
+                if (scope) {
+                  const nextNo = await generateShippingNo(scope)
+                  setShippingNo(nextNo)
+                }
               }}
               className="px-4 py-2.5 text-sm border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
             >

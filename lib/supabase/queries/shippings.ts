@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client'
-import type { InventoryStatus, ShippingStatus } from '@/lib/types'
+import type { InventoryStatus, ShippingStatus, QueryScope } from '@/lib/types'
 
 // Supabase typed client が DML の Insert/Update 型を never に解決するため、
 // INSERT / UPDATE のみ any キャストで回避する。SELECT は typed client を使用。
@@ -89,13 +89,14 @@ function toInventoryStatus(raw: string): InventoryStatus {
 // マスタ選択肢取得
 // =============================================================
 
-export async function fetchCustomerOptions(): Promise<{
+export async function fetchCustomerOptions(tenantId: string): Promise<{
   data:  CustomerOption[]
   error: string | null
 }> {
   const { data, error } = await supabase
     .from('customers')
     .select('id, customer_code, customer_name_ja')
+    .eq('tenant_id', tenantId)
     .eq('status', 'active')
     .order('customer_code')
 
@@ -110,13 +111,14 @@ export async function fetchCustomerOptions(): Promise<{
   }
 }
 
-export async function fetchShipProductOptions(): Promise<{
+export async function fetchShipProductOptions(tenantId: string): Promise<{
   data:  ShipProductOption[]
   error: string | null
 }> {
   const { data, error } = await supabase
     .from('products')
     .select('id, product_code, product_name_ja, unit, category')
+    .eq('tenant_id', tenantId)
     .eq('status', 'active')
     .order('product_code')
 
@@ -139,7 +141,10 @@ export async function fetchShipProductOptions(): Promise<{
 //       hold / damaged は除外される
 // =============================================================
 
-export async function fetchInventoryForProduct(productId: string): Promise<{
+export async function fetchInventoryForProduct(
+  productId: string,
+  scope: QueryScope,
+): Promise<{
   data:  InventoryLine[]
   error: string | null
 }> {
@@ -151,7 +156,9 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
       id, on_hand_qty, allocated_qty, status, received_date,
       locations ( id, location_code, location_name )
     `)
-    .eq('product_id', productId)
+    .eq('product_id',   productId)
+    .eq('tenant_id',    scope.tenantId)
+    .eq('warehouse_id', scope.warehouseId)
     .in('status', FIFO_ELIGIBLE_STATUSES)
     .gt('on_hand_qty', 0)
 
@@ -197,7 +204,10 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
 // available_qty > 0 の行のみ表示（引当不可行は非表示）
 // =============================================================
 
-export async function fetchInventoryForManualAllocation(productId: string): Promise<{
+export async function fetchInventoryForManualAllocation(
+  productId: string,
+  scope: QueryScope,
+): Promise<{
   data:  InventoryLine[]
   error: string | null
 }> {
@@ -209,7 +219,9 @@ export async function fetchInventoryForManualAllocation(productId: string): Prom
       id, on_hand_qty, allocated_qty, status, received_date,
       locations ( id, location_code, location_name )
     `)
-    .eq('product_id', productId)
+    .eq('product_id',   productId)
+    .eq('tenant_id',    scope.tenantId)
+    .eq('warehouse_id', scope.warehouseId)
     .gt('on_hand_qty', 0)
 
   if (error) return { data: [], error: error.message }
@@ -296,11 +308,15 @@ export function computeFifoAllocation(
  * 指定した出庫指示番号が既に存在するかチェックする。
  * true = 重複あり（登録不可）、false = 未使用（登録可能）
  */
-export async function checkShippingNoExists(shippingNo: string): Promise<boolean> {
+export async function checkShippingNoExists(
+  shippingNo: string,
+  tenantId:   string,
+): Promise<boolean> {
   const { data } = await supabase
     .from('shipping_headers')
     .select('id')
     .eq('shipping_no', shippingNo)
+    .eq('tenant_id',   tenantId)
     .maybeSingle()
   return data !== null
 }
@@ -309,13 +325,14 @@ export async function checkShippingNoExists(shippingNo: string): Promise<boolean
 // 出庫指示番号の自動採番
 // =============================================================
 
-export async function generateShippingNo(): Promise<string> {
+export async function generateShippingNo(scope: QueryScope): Promise<string> {
   const year   = new Date().getFullYear()
   const prefix = `SHP-${year}-`
 
   const { data } = await supabase
     .from('shipping_headers')
     .select('shipping_no')
+    .eq('tenant_id', scope.tenantId)
     .like('shipping_no', `${prefix}%`)
     .order('shipping_no', { ascending: false })
     .limit(1)
@@ -337,6 +354,7 @@ export async function createShippingOrder(params: {
   shippingDate: string   // YYYY-MM-DD
   customerId:   string
   memo?:        string
+  scope:        QueryScope
   lines: Array<{
     lineNo:       number
     productId:    string
@@ -347,7 +365,7 @@ export async function createShippingOrder(params: {
     }>
   }>
 }): Promise<{ error: string | null }> {
-  const { shippingNo, shippingDate, customerId, memo, lines } = params
+  const { shippingNo, shippingDate, customerId, memo, scope, lines } = params
 
   try {
     // ── Step 1: shipping_headers を INSERT ───────────────────
@@ -358,6 +376,8 @@ export async function createShippingOrder(params: {
         customer_id:   customerId,
         status:        'pending',
         memo:          memo ?? null,
+        tenant_id:     scope.tenantId,
+        warehouse_id:  scope.warehouseId,
       })
       .select('id')
       .single()
@@ -374,6 +394,8 @@ export async function createShippingOrder(params: {
       requested_qty: l.requestedQty,
       shipped_qty:   0,
       status:        'pending',
+      tenant_id:     scope.tenantId,
+      warehouse_id:  scope.warehouseId,
     }))
 
     const { data: lineData, error: linesErr } = await dml('shipping_lines')
@@ -606,7 +628,7 @@ function formatDateDisplay(raw: string): string {
 // 出庫指示一覧取得
 // =============================================================
 
-export async function fetchShippingOrders(): Promise<{
+export async function fetchShippingOrders(scope: QueryScope): Promise<{
   data:  ShippingOrderSummary[]
   error: string | null
 }> {
@@ -617,6 +639,8 @@ export async function fetchShippingOrders(): Promise<{
       customers ( customer_name_ja ),
       shipping_lines ( id )
     `)
+    .eq('tenant_id',    scope.tenantId)
+    .eq('warehouse_id', scope.warehouseId)
     .order('created_at', { ascending: false })
 
   if (error) return { data: [], error: error.message }
