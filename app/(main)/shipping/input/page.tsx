@@ -17,6 +17,7 @@ import {
   fetchCustomerOptions,
   fetchShipProductOptions,
   fetchInventoryForProduct,
+  fetchInventoryForManualAllocation,
   computeFifoAllocation,
   generateShippingNo,
   createShippingOrder,
@@ -239,6 +240,9 @@ function AllocationResult({ allocations, requestedQty, mode, onReset, t }: Alloc
               <AlertTriangle size={10} />
               {t('shortage')} {shortage}
             </span>
+          )}
+          {shortage > 0 && mode === 'fifo' && (
+            <span className="text-[10px] text-amber-500 ml-1">（available 在庫が不足。hold / damaged は自動引当対象外）</span>
           )}
         </div>
         <button
@@ -476,6 +480,7 @@ export default function ShippingInputPage() {
     const { data, error } = await fetchInventoryForProduct(line.productId)
     if (error || !data) return
 
+    // available 在庫がゼロの場合（hold / damaged は除外済みのため在庫なし扱い）
     if (data.length === 0) {
       updateLine(uid, { allocations: [], allocationMode: 'fifo' })
       return
@@ -486,13 +491,14 @@ export default function ShippingInputPage() {
   }, [lines, updateLine])
 
   // ── 手動引当モーダルを開く ────────────────────────────────
+  // 手動引当は hold / damaged も表示（担当者が意図的に選択できる）
   const handleOpenManual = useCallback(async (uid: string) => {
     const line = lines.find((l) => l.uid === uid)
     if (!line) return
 
     setManualUid(uid)
     setManualLoading(true)
-    const { data } = await fetchInventoryForProduct(line.productId)
+    const { data } = await fetchInventoryForManualAllocation(line.productId)
     setManualInventory(data ?? [])
     setManualLoading(false)
   }, [lines])

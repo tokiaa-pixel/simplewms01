@@ -66,6 +66,17 @@ export type AllocationItem = {
 }
 
 // =============================================================
+// 引当ステータス定数
+// =============================================================
+
+/**
+ * FIFO 自動引当の対象とする在庫ステータス。
+ * hold / damaged は自動引当の対象外。
+ * 将来新しいステータスを追加する場合はこの配列を修正する。
+ */
+export const FIFO_ELIGIBLE_STATUSES: InventoryStatus[] = ['available']
+
+// =============================================================
 // 内部ユーティリティ
 // =============================================================
 
@@ -123,13 +134,17 @@ export async function fetchShipProductOptions(): Promise<{
 }
 
 // =============================================================
-// 商品の引当可能在庫一覧取得（status = available, available_qty > 0）
+// FIFO 自動引当用：引当可能在庫一覧取得
+// 対象：FIFO_ELIGIBLE_STATUSES（現在は 'available' のみ）
+//       hold / damaged は除外される
 // =============================================================
 
 export async function fetchInventoryForProduct(productId: string): Promise<{
   data:  InventoryLine[]
   error: string | null
 }> {
+  // FIFO_ELIGIBLE_STATUSES に含まれるステータスのみ取得（available のみ）
+  // hold / damaged の在庫はここで DB 側から除外する
   const { data, error } = await supabase
     .from('inventory')
     .select(`
@@ -137,7 +152,7 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
       locations ( id, location_code, location_name )
     `)
     .eq('product_id', productId)
-    .eq('status', 'available')
+    .in('status', FIFO_ELIGIBLE_STATUSES)
     .gt('on_hand_qty', 0)
 
   if (error) return { data: [], error: error.message }
@@ -145,15 +160,15 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
   const rows = data as unknown as InventoryRaw[]
 
   // available_qty = on_hand_qty - allocated_qty が正のものだけ残す
-  const available = rows
+  const eligible = rows
     .map((r) => ({
       ...r,
       _availableQty: Math.max(0, (r.on_hand_qty ?? 0) - (r.allocated_qty ?? 0)),
     }))
     .filter((r) => r._availableQty > 0)
 
-  // FIFO 順（received_date ASC nulls last）
-  available.sort((a, b) => {
+  // FIFO 順（received_date ASC、null は末尾）
+  eligible.sort((a, b) => {
     if (!a.received_date && !b.received_date) return 0
     if (!a.received_date) return 1
     if (!b.received_date) return -1
@@ -161,9 +176,66 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
   })
 
   return {
-    data: available.map((r) => ({
+    data: eligible.map((r) => ({
       inventoryId:  r.id,
-      locationId:   r.locations?.id          ?? '',
+      locationId:   r.locations?.id           ?? '',
+      locationCode: r.locations?.location_code ?? '',
+      locationName: r.locations?.location_name ?? '',
+      status:       toInventoryStatus(r.status),
+      onHandQty:    r.on_hand_qty   ?? 0,
+      allocatedQty: r.allocated_qty ?? 0,
+      availableQty: r._availableQty,
+      receivedDate: r.received_date,
+    })),
+    error: null,
+  }
+}
+
+// =============================================================
+// 手動引当用：引当可能在庫一覧取得（全ステータス表示）
+// FIFO と異なり hold / damaged も表示する（担当者が意図的に選択可能）
+// available_qty > 0 の行のみ表示（引当不可行は非表示）
+// =============================================================
+
+export async function fetchInventoryForManualAllocation(productId: string): Promise<{
+  data:  InventoryLine[]
+  error: string | null
+}> {
+  // ステータスでの絞り込みを行わず、全ステータスの在庫を返す
+  // （hold / damaged も担当者が確認・選択できるよう表示する）
+  const { data, error } = await supabase
+    .from('inventory')
+    .select(`
+      id, on_hand_qty, allocated_qty, status, received_date,
+      locations ( id, location_code, location_name )
+    `)
+    .eq('product_id', productId)
+    .gt('on_hand_qty', 0)
+
+  if (error) return { data: [], error: error.message }
+
+  const rows = data as unknown as InventoryRaw[]
+
+  // available_qty > 0 の行のみ（引当できない在庫は非表示）
+  const withQty = rows
+    .map((r) => ({
+      ...r,
+      _availableQty: Math.max(0, (r.on_hand_qty ?? 0) - (r.allocated_qty ?? 0)),
+    }))
+    .filter((r) => r._availableQty > 0)
+
+  // 表示順：received_date ASC（ステータスによらず FIFO 順で並べる）
+  withQty.sort((a, b) => {
+    if (!a.received_date && !b.received_date) return 0
+    if (!a.received_date) return 1
+    if (!b.received_date) return -1
+    return a.received_date.localeCompare(b.received_date)
+  })
+
+  return {
+    data: withQty.map((r) => ({
+      inventoryId:  r.id,
+      locationId:   r.locations?.id           ?? '',
       locationCode: r.locations?.location_code ?? '',
       locationName: r.locations?.location_name ?? '',
       status:       toInventoryStatus(r.status),
@@ -181,9 +253,13 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
 // =============================================================
 
 /**
- * 在庫行リスト（received_date ASC でソート済み前提）から
- * requestedQty を満たす引当を計算して返す。
- * available_qty を超えた引当は行わない。在庫不足の場合は可能な限り引当。
+ * FIFO 自動引当の計算（純粋関数・DB アクセスなし）。
+ * 呼び出し元は fetchInventoryForProduct（FIFO_ELIGIBLE_STATUSES でフィルタ済み）から
+ * 取得した lines を渡すこと。hold / damaged の行はここに渡されない前提。
+ *
+ * - received_date ASC でソート済みの lines を先頭から順に引き当てる
+ * - available_qty を超えた引当は行わない
+ * - 在庫不足の場合は可能な限り引当て、不足分は呼び出し元が検知する
  */
 export function computeFifoAllocation(
   lines: InventoryLine[],
