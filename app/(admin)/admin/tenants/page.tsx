@@ -166,12 +166,19 @@ export default function AdminTenantsPage() {
   const [warehouseCounts, setWarehouseCounts] = useState<Record<string, number>>({})
   const [search, setSearch]               = useState('')
   const [loading, setLoading]             = useState(true)
+  const [loadError, setLoadError]         = useState<string | null>(null)
   const [modalMode, setModalMode]         = useState<'create' | 'edit' | null>(null)
   const [editTarget, setEditTarget]       = useState<Tenant | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { data } = await fetchAllTenants()
+    setLoadError(null)
+    const { data, error } = await fetchAllTenants()
+    if (error) {
+      setLoadError(error)
+      setLoading(false)
+      return
+    }
     setTenants(data)
     // 各荷主の倉庫数を並行取得
     const counts = await Promise.all(
@@ -261,6 +268,10 @@ export default function AdminTenantsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={99} className="py-14 text-center text-sm text-slate-400">{tc('loading')}</td></tr>
+              ) : loadError ? (
+                <tr><td colSpan={99} className="py-14 text-center text-sm text-red-500">
+                  エラー: {loadError}
+                </td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={99} className="py-14 text-center text-sm text-slate-400">{t('emptyTenants')}</td></tr>
               ) : filtered.map((tenant) => (

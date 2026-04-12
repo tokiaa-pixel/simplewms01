@@ -178,14 +178,19 @@ export default function AdminWarehousesPage() {
   const [search, setSearch]                     = useState('')
   const [loadingTenants, setLoadingTenants]     = useState(true)
   const [loadingWH, setLoadingWH]               = useState(false)
+  const [loadError, setLoadError]               = useState<string | null>(null)
   const [modalMode, setModalMode]               = useState<'create' | 'edit' | null>(null)
   const [editTarget, setEditTarget]             = useState<Warehouse | null>(null)
 
   // 荷主一覧取得
   useEffect(() => {
-    fetchAllTenants().then(({ data }) => {
-      setTenants(data)
-      if (data.length > 0) setSelectedTenantId(data[0].id)
+    fetchAllTenants().then(({ data, error }) => {
+      if (error) {
+        setLoadError(error)
+      } else {
+        setTenants(data)
+        if (data.length > 0) setSelectedTenantId(data[0].id)
+      }
       setLoadingTenants(false)
     })
   }, [])
@@ -194,8 +199,13 @@ export default function AdminWarehousesPage() {
   const loadWarehouses = useCallback(async () => {
     if (!selectedTenantId) { setWarehouses([]); return }
     setLoadingWH(true)
-    const { data } = await fetchAllWarehousesForTenant(selectedTenantId)
-    setWarehouses(data)
+    setLoadError(null)
+    const { data, error } = await fetchAllWarehousesForTenant(selectedTenantId)
+    if (error) {
+      setLoadError(error)
+    } else {
+      setWarehouses(data)
+    }
     setLoadingWH(false)
   }, [selectedTenantId])
 
@@ -316,6 +326,10 @@ export default function AdminWarehousesPage() {
             <tbody className="divide-y divide-slate-100">
               {loadingWH ? (
                 <tr><td colSpan={99} className="py-14 text-center text-sm text-slate-400">{tc('loading')}</td></tr>
+              ) : loadError ? (
+                <tr><td colSpan={99} className="py-14 text-center text-sm text-red-500">
+                  エラー: {loadError}
+                </td></tr>
               ) : !selectedTenantId ? (
                 <tr><td colSpan={99} className="py-14 text-center text-sm text-slate-400">{t('noTenantSelected')}</td></tr>
               ) : filtered.length === 0 ? (
