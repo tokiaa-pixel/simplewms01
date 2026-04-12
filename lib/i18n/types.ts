@@ -433,21 +433,40 @@ export interface Translations {
     tenantsSubtitle: string
     tenantCode: string
     tenantCodePlaceholder: string
-    tenantName: string
-    tenantNamePlaceholder: string
+    tenantNameJa: string
+    tenantNameJaPlaceholder: string
+    tenantNameEn: string
+    tenantNameEnPlaceholder: string
+    memo: string
+    memoPlaceholder: string
     colTenantCode: string
     colTenantName: string
     colStatus: string
     colWarehouseCount: string
+    colUpdatedAt: string
     searchTenantsPlaceholder: string
-    modalTenantTitle: string
-    errTenantName: string
+    modalCreateTenantTitle: string
+    modalEditTenantTitle: string
+    errTenantNameJa: string
     errTenantCode: string
     errTenantCodeFormat: string
     emptyTenants: string
     // 倉庫管理ページ
     warehousesTitle: string
     warehousesSubtitle: string
+    warehouseCode: string
+    warehouseCodePlaceholder: string
+    warehouseNameJa: string
+    warehouseNameJaPlaceholder: string
+    warehouseNameEn: string
+    warehouseNameEnPlaceholder: string
+    colWarehouseCode: string
+    colWarehouseNameJa: string
+    colTenantRef: string
+    searchWarehousesPlaceholder: string
+    modalCreateWarehouseTitle: string
+    modalEditWarehouseTitle: string
+    errWarehouseNameJa: string
     selectTenantLabel: string
     noTenantSelected: string
     // 共通

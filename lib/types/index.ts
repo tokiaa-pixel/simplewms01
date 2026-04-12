@@ -7,19 +7,24 @@ export type QueryScope = {
 }
 
 export interface Tenant {
-  id:     string
-  code:   string
-  name:   string
-  status: 'active' | 'inactive'
+  id:         string
+  code:       string
+  nameJa:     string
+  nameEn:     string
+  status:     'active' | 'inactive'
+  memo?:      string
+  updatedAt:  string
 }
 
 export interface Warehouse {
-  id:        string
-  tenantId:  string
-  code:      string
-  name:      string
-  address?:  string
-  status:    'active' | 'inactive'
+  id:         string
+  tenantId:   string
+  code:       string
+  nameJa:     string
+  nameEn:     string
+  status:     'active' | 'inactive'
+  memo?:      string
+  updatedAt:  string
 }
 
 // ─── 在庫ステータス ───────────────────────────────────────────

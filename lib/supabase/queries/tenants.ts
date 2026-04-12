@@ -2,9 +2,41 @@ import { supabase } from '@/lib/supabase/client'
 import type { Tenant, Warehouse } from '@/lib/types'
 
 // =============================================================
-// 荷主一覧取得
-// NOTE: Supabase Auth が本番接続されたら user_tenant_permissions で絞り込む。
-//       現時点（ダミー認証）はアクティブな全荷主を返す。
+// ヘルパー：DB行 → TypeScript型
+// ※ migration_v2.sql 実行前後どちらでも動くよう
+//   tenant_name_ja が無ければ tenant_name にフォールバック
+// =============================================================
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToTenant(r: Record<string, any>): Tenant {
+  return {
+    id:        String(r.id        ?? ''),
+    code:      String(r.tenant_code ?? ''),
+    nameJa:    String(r.tenant_name_ja ?? r.tenant_name ?? ''),
+    nameEn:    String(r.tenant_name_en ?? ''),
+    status:    (r.status ?? 'active') as Tenant['status'],
+    memo:      r.memo  ?? undefined,
+    updatedAt: r.updated_at ?? '',
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToWarehouse(r: Record<string, any>): Warehouse {
+  return {
+    id:        String(r.id           ?? ''),
+    tenantId:  String(r.tenant_id    ?? ''),
+    code:      String(r.warehouse_code ?? ''),
+    nameJa:    String(r.warehouse_name_ja ?? r.warehouse_name ?? ''),
+    nameEn:    String(r.warehouse_name_en ?? ''),
+    status:    (r.status ?? 'active') as Warehouse['status'],
+    memo:      r.memo  ?? undefined,
+    updatedAt: r.updated_at ?? '',
+  }
+}
+
+// =============================================================
+// 荷主一覧取得（アクティブのみ、サイドバー用）
+// select('*') で全列取得し、フォールバックマッピングを適用
 // =============================================================
 
 export async function fetchTenantsForUser(): Promise<{
@@ -13,57 +45,13 @@ export async function fetchTenantsForUser(): Promise<{
 }> {
   const { data, error } = await supabase
     .from('tenants')
-    .select('id, tenant_code, tenant_name, status')
+    .select('*')
     .eq('status', 'active')
     .order('tenant_code')
 
   if (error) return { data: [], error: error.message }
-
-  type Row = { id: string; tenant_code: string; tenant_name: string; status: string }
-  return {
-    data: (data as unknown as Row[]).map((r) => ({
-      id:     r.id,
-      code:   r.tenant_code,
-      name:   r.tenant_name,
-      status: r.status as Tenant['status'],
-    })),
-    error: null,
-  }
-}
-
-// =============================================================
-// 倉庫一覧取得（荷主でフィルタ）
-// NOTE: Supabase Auth が本番接続されたら user_warehouse_permissions で絞り込む。
-// =============================================================
-
-export async function fetchWarehousesForTenant(tenantId: string): Promise<{
-  data:  Warehouse[]
-  error: string | null
-}> {
-  const { data, error } = await supabase
-    .from('warehouses')
-    .select('id, tenant_id, warehouse_code, warehouse_name, address, status')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .order('warehouse_code')
-
-  if (error) return { data: [], error: error.message }
-
-  type Row = {
-    id: string; tenant_id: string; warehouse_code: string
-    warehouse_name: string; address: string | null; status: string
-  }
-  return {
-    data: (data as unknown as Row[]).map((r) => ({
-      id:       r.id,
-      tenantId: r.tenant_id,
-      code:     r.warehouse_code,
-      name:     r.warehouse_name,
-      address:  r.address ?? undefined,
-      status:   r.status as Warehouse['status'],
-    })),
-    error: null,
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { data: (data as any[]).map(rowToTenant), error: null }
 }
 
 // =============================================================
@@ -76,21 +64,12 @@ export async function fetchAllTenants(): Promise<{
 }> {
   const { data, error } = await supabase
     .from('tenants')
-    .select('id, tenant_code, tenant_name, status')
+    .select('*')
     .order('tenant_code')
 
   if (error) return { data: [], error: error.message }
-
-  type Row = { id: string; tenant_code: string; tenant_name: string; status: string }
-  return {
-    data: (data as unknown as Row[]).map((r) => ({
-      id:     r.id,
-      code:   r.tenant_code,
-      name:   r.tenant_name,
-      status: r.status as Tenant['status'],
-    })),
-    error: null,
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { data: (data as any[]).map(rowToTenant), error: null }
 }
 
 // =============================================================
@@ -98,31 +77,52 @@ export async function fetchAllTenants(): Promise<{
 // =============================================================
 
 export async function createTenant(params: {
-  code: string
-  name: string
+  code:   string
+  nameJa: string
+  nameEn: string
+  memo?:  string
 }): Promise<{ data: Tenant | null; error: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase.from('tenants') as any)
     .insert({
-      tenant_code: params.code.trim(),
-      tenant_name: params.name.trim(),
-      status:      'active',
+      tenant_code:    params.code.trim(),
+      tenant_name:    params.nameJa.trim(),   // 旧列との互換
+      tenant_name_ja: params.nameJa.trim(),
+      tenant_name_en: params.nameEn.trim() || null,
+      memo:           params.memo?.trim() || null,
+      status:         'active',
     })
-    .select('id, tenant_code, tenant_name, status')
+    .select('*')
     .single()
 
   if (error) return { data: null, error: error.message }
-
-  type Row = { id: string; tenant_code: string; tenant_name: string; status: string }
-  const r = data as unknown as Row
-  return {
-    data: { id: r.id, code: r.tenant_code, name: r.tenant_name, status: r.status as Tenant['status'] },
-    error: null,
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { data: rowToTenant(data as any), error: null }
 }
 
 // =============================================================
-// 荷主ステータス切替（active ↔ inactive）（管理者用）
+// 荷主更新（管理者用）
+// =============================================================
+
+export async function updateTenant(
+  id:     string,
+  params: { nameJa: string; nameEn: string; memo?: string },
+): Promise<{ error: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase.from('tenants') as any)
+    .update({
+      tenant_name:    params.nameJa.trim(),
+      tenant_name_ja: params.nameJa.trim(),
+      tenant_name_en: params.nameEn.trim() || null,
+      memo:           params.memo?.trim() || null,
+    })
+    .eq('id', id)
+
+  return { error: error?.message ?? null }
+}
+
+// =============================================================
+// 荷主ステータス切替（active ↔ inactive）
 // =============================================================
 
 export async function toggleTenantStatus(
@@ -139,7 +139,27 @@ export async function toggleTenantStatus(
 }
 
 // =============================================================
-// 倉庫一覧取得（全ステータス、マスタ管理用）
+// 倉庫一覧取得（アクティブのみ、サイドバー用）
+// =============================================================
+
+export async function fetchWarehousesForTenant(tenantId: string): Promise<{
+  data:  Warehouse[]
+  error: string | null
+}> {
+  const { data, error } = await supabase
+    .from('warehouses')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .order('warehouse_code')
+
+  if (error) return { data: [], error: error.message }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { data: (data as any[]).map(rowToWarehouse), error: null }
+}
+
+// =============================================================
+// 倉庫一覧取得（全ステータス、管理者用）
 // =============================================================
 
 export async function fetchAllWarehousesForTenant(tenantId: string): Promise<{
@@ -148,27 +168,13 @@ export async function fetchAllWarehousesForTenant(tenantId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from('warehouses')
-    .select('id, tenant_id, warehouse_code, warehouse_name, address, status')
+    .select('*')
     .eq('tenant_id', tenantId)
     .order('warehouse_code')
 
   if (error) return { data: [], error: error.message }
-
-  type Row = {
-    id: string; tenant_id: string; warehouse_code: string
-    warehouse_name: string; address: string | null; status: string
-  }
-  return {
-    data: (data as unknown as Row[]).map((r) => ({
-      id:       r.id,
-      tenantId: r.tenant_id,
-      code:     r.warehouse_code,
-      name:     r.warehouse_name,
-      address:  r.address ?? undefined,
-      status:   r.status as Warehouse['status'],
-    })),
-    error: null,
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { data: (data as any[]).map(rowToWarehouse), error: null }
 }
 
 // =============================================================
@@ -177,10 +183,11 @@ export async function fetchAllWarehousesForTenant(tenantId: string): Promise<{
 
 export async function createWarehouse(params: {
   tenantId: string
-  name:     string
-  address?: string
+  nameJa:   string
+  nameEn?:  string
+  memo?:    string
 }): Promise<{ data: Warehouse | null; error: string | null }> {
-  // 連番コードを生成（既存最大番号 + 1）
+  // 連番コードを生成
   const { data: existing } = await supabase
     .from('warehouses')
     .select('warehouse_code')
@@ -188,41 +195,49 @@ export async function createWarehouse(params: {
     .order('warehouse_code', { ascending: false })
     .limit(1)
 
-  type CodeRow = { warehouse_code: string }
-  const lastCode = (existing as unknown as CodeRow[] | null)?.[0]?.warehouse_code ?? 'W-0000'
-  const lastNum  = parseInt(lastCode.replace('W-', ''), 10) || 0
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lastCode = (existing as any)?.[0]?.warehouse_code ?? 'W-0000'
+  const lastNum  = parseInt(String(lastCode).replace('W-', ''), 10) || 0
   const newCode  = `W-${String(lastNum + 1).padStart(4, '0')}`
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase.from('warehouses') as any)
     .insert({
-      tenant_id:      params.tenantId,
-      warehouse_code: newCode,
-      warehouse_name: params.name,
-      address:        params.address ?? null,
-      status:         'active',
+      tenant_id:          params.tenantId,
+      warehouse_code:     newCode,
+      warehouse_name:     params.nameJa.trim(),   // 旧列との互換
+      warehouse_name_ja:  params.nameJa.trim(),
+      warehouse_name_en:  params.nameEn?.trim() || null,
+      memo:               params.memo?.trim() || null,
+      status:             'active',
     })
-    .select('id, tenant_id, warehouse_code, warehouse_name, address, status')
+    .select('*')
     .single()
 
   if (error) return { data: null, error: error.message }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { data: rowToWarehouse(data as any), error: null }
+}
 
-  type Row = {
-    id: string; tenant_id: string; warehouse_code: string
-    warehouse_name: string; address: string | null; status: string
-  }
-  const r = data as unknown as Row
-  return {
-    data: {
-      id:       r.id,
-      tenantId: r.tenant_id,
-      code:     r.warehouse_code,
-      name:     r.warehouse_name,
-      address:  r.address ?? undefined,
-      status:   r.status as Warehouse['status'],
-    },
-    error: null,
-  }
+// =============================================================
+// 倉庫更新（管理者用）
+// =============================================================
+
+export async function updateWarehouse(
+  id:     string,
+  params: { nameJa: string; nameEn?: string; memo?: string },
+): Promise<{ error: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase.from('warehouses') as any)
+    .update({
+      warehouse_name:    params.nameJa.trim(),
+      warehouse_name_ja: params.nameJa.trim(),
+      warehouse_name_en: params.nameEn?.trim() || null,
+      memo:              params.memo?.trim() || null,
+    })
+    .eq('id', id)
+
+  return { error: error?.message ?? null }
 }
 
 // =============================================================

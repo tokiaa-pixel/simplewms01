@@ -235,7 +235,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               >
                 {availableTenants.map((t) => (
                   <option key={t.id} value={t.id} style={{ backgroundColor: '#002B5C', color: '#fff' }}>
-                    {t.name}
+                    {t.nameJa}
                   </option>
                 ))}
               </select>
@@ -274,7 +274,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 ) : (
                   availableWarehouses.map((w) => (
                     <option key={w.id} value={w.id} style={{ backgroundColor: '#002B5C', color: '#fff' }}>
-                      {w.name}
+                      {w.nameJa}
                     </option>
                   ))
                 )}

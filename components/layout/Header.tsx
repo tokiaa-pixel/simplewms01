@@ -93,7 +93,7 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-teal max-w-[140px] truncate"
               >
                 {availableTenants.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+                  <option key={t.id} value={t.id}>{t.nameJa}</option>
                 ))}
               </select>
             </div>
@@ -116,7 +116,7 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
                   <option value="">{th('warehousePlaceholder')}</option>
                 ) : (
                   availableWarehouses.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
+                    <option key={w.id} value={w.id}>{w.nameJa}</option>
                   ))
                 )}
               </select>
