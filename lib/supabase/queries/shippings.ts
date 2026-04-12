@@ -289,6 +289,23 @@ export function computeFifoAllocation(
 }
 
 // =============================================================
+// 出庫指示番号の重複チェック
+// =============================================================
+
+/**
+ * 指定した出庫指示番号が既に存在するかチェックする。
+ * true = 重複あり（登録不可）、false = 未使用（登録可能）
+ */
+export async function checkShippingNoExists(shippingNo: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('shipping_headers')
+    .select('id')
+    .eq('shipping_no', shippingNo)
+    .maybeSingle()
+  return data !== null
+}
+
+// =============================================================
 // 出庫指示番号の自動採番
 // =============================================================
 

@@ -20,6 +20,7 @@ import {
   fetchInventoryForManualAllocation,
   computeFifoAllocation,
   generateShippingNo,
+  checkShippingNoExists,
   createShippingOrder,
 } from '@/lib/supabase/queries/shippings'
 
@@ -500,6 +501,8 @@ export default function ShippingInputPage() {
   const [loading, setLoading] = useState(true)
 
   // ── フォーム状態 ──────────────────────────────────────────
+  const [shippingNo,       setShippingNo]       = useState('')
+  const [shippingNoChecking, setShippingNoChecking] = useState(false)
   const [customerId,    setCustomerId]    = useState('')
   const [shippingDate,  setShippingDate]  = useState(() => {
     const d = new Date()
@@ -517,15 +520,18 @@ export default function ShippingInputPage() {
   const [manualInventory,  setManualInventory]  = useState<InventoryLine[]>([])
   const [manualLoading,    setManualLoading]    = useState(false)
 
-  // ── 初期データ読み込み ────────────────────────────────────
+  // ── 初期データ読み込み（出庫指示番号の採番も並列で実行） ──────
   useEffect(() => {
-    Promise.all([fetchCustomerOptions(), fetchShipProductOptions()]).then(
-      ([cust, prod]) => {
-        if (cust.data) setCustomers(cust.data)
-        if (prod.data) setProducts(prod.data)
-        setLoading(false)
-      }
-    )
+    Promise.all([
+      fetchCustomerOptions(),
+      fetchShipProductOptions(),
+      generateShippingNo(),
+    ]).then(([cust, prod, no]) => {
+      if (cust.data) setCustomers(cust.data)
+      if (prod.data) setProducts(prod.data)
+      setShippingNo(no)
+      setLoading(false)
+    })
   }, [])
 
   // ── ライン操作 ────────────────────────────────────────────
@@ -588,9 +594,28 @@ export default function ShippingInputPage() {
     setManualInventory([])
   }
 
+  // ── 出庫指示番号の重複チェック（blur時） ─────────────────────
+  const handleShippingNoBlur = async () => {
+    const no = shippingNo.trim()
+    if (!no) return
+    setShippingNoChecking(true)
+    const exists = await checkShippingNoExists(no)
+    setShippingNoChecking(false)
+    if (exists) {
+      setErrors((prev) => ({ ...prev, shippingNo: t('errShippingNoDup') }))
+    } else {
+      setErrors((prev) => { const next = { ...prev }; delete next.shippingNo; return next })
+    }
+  }
+
   // ── バリデーション ────────────────────────────────────────
   const validate = (): boolean => {
     const errs: FormErrors = {}
+
+    // 出庫指示番号
+    if (!shippingNo.trim()) errs.shippingNo = t('errShippingNo')
+    // 重複エラーが既にセットされていれば引き継ぐ
+    else if (errors.shippingNo) errs.shippingNo = errors.shippingNo
 
     if (!customerId)    errs.customerId    = t('errCustomer')
     if (!shippingDate)  errs.shippingDate  = t('errDate')
@@ -617,11 +642,18 @@ export default function ShippingInputPage() {
     if (!validate()) return
     setSubmitting(true)
 
-    const shippingNo = await generateShippingNo()
+    // submit 直前にも重複チェック（フォームを離れずに送信した場合の安全網）
+    const dupExists = await checkShippingNoExists(shippingNo.trim())
+    if (dupExists) {
+      setErrors((prev) => ({ ...prev, shippingNo: t('errShippingNoDup') }))
+      setSubmitting(false)
+      return
+    }
+
     const validLines = lines.filter((l) => l.productId)
 
     const { error } = await createShippingOrder({
-      shippingNo,
+      shippingNo: shippingNo.trim(),
       shippingDate,
       customerId,
       memo: note.trim() || undefined,
@@ -661,7 +693,7 @@ export default function ShippingInputPage() {
           <p className="text-xs text-slate-400">{t('successNote')}</p>
           <div className="flex flex-col sm:flex-row gap-3 mt-3 w-full sm:w-auto">
             <button
-              onClick={() => {
+              onClick={async () => {
                 const d = new Date()
                 setCustomerId('')
                 setShippingDate([d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'))
@@ -669,6 +701,9 @@ export default function ShippingInputPage() {
                 setLines([emptyLine(`${uid}-reset`)])
                 setErrors({})
                 setSubmitted(false)
+                // 次の出庫指示番号を採番して自動セット
+                const nextNo = await generateShippingNo()
+                setShippingNo(nextNo)
               }}
               className="px-4 py-2.5 text-sm border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors"
             >
@@ -715,6 +750,36 @@ export default function ShippingInputPage() {
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-6">
+          {/* 出庫指示番号 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
+              {t('shippingNoLabel')} <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={shippingNo}
+                onChange={(e) => {
+                  setShippingNo(e.target.value)
+                  setErrors((prev) => { const next = { ...prev }; delete next.shippingNo; return next })
+                }}
+                onBlur={handleShippingNoBlur}
+                placeholder={t('shippingNoPlaceholder')}
+                className={`w-full sm:w-72 border rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal ${
+                  errors.shippingNo ? 'border-red-400 bg-red-50' : 'border-slate-300'
+                }`}
+              />
+              {shippingNoChecking && (
+                <span className="text-xs text-slate-400 whitespace-nowrap">確認中...</span>
+              )}
+            </div>
+            {errors.shippingNo && (
+              <p className="flex items-center gap-1 text-xs text-red-500 mt-1">
+                <AlertCircle size={11} /> {errors.shippingNo}
+              </p>
+            )}
+          </div>
+
           {/* 出荷先 / 出庫予定日 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>

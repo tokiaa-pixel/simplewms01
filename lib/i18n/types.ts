@@ -282,6 +282,10 @@ export interface Translations {
     successNote: string
     continueBtn: string
     toMenuBtn: string
+    shippingNoLabel: string
+    shippingNoPlaceholder: string
+    errShippingNo: string
+    errShippingNoDup: string
     customer: string
     customerPlaceholder: string
     requestedDate: string
