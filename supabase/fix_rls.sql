@@ -1,69 +1,113 @@
 -- =============================================================
--- fix_rls.sql
--- RLS (Row Level Security) の確認と修正
+-- fix_rls.sql  ― anon ロール向け SELECT ポリシー追加
+-- =============================================================
+-- 【問題】
+--   このアプリは Supabase Auth を使わずダミー認証を使っているため、
+--   Supabase クライアントは常に "anon" ロールでリクエストを送信します。
+--   すべてのテーブルのポリシーは "authenticated" ロール向けのみのため、
+--   anon からのリクエストはデータが返らず空配列になります。
 --
--- 管理者画面で荷主・倉庫一覧が空になる場合、
--- RLS が有効で SELECT ポリシーが未設定の可能性があります。
+-- 【対応】
+--   全業務テーブルに anon ロール向けの SELECT ポリシーを追加します。
+--   既存の authenticated ポリシーはそのまま残します。
 --
--- 【手順】
--- 1. まず現状確認クエリを実行して RLS の状態を確認
--- 2. 環境に合わせて修正クエリを選択して実行
+-- 【実行方法】
+--   Supabase Dashboard → SQL Editor に貼り付けてそのまま実行してください。
 -- =============================================================
 
--- ─── 1. 現状確認 ─────────────────────────────────────────────
 
--- RLS 有効/無効の確認
-SELECT
-  tablename,
-  rowsecurity AS rls_enabled
-FROM pg_tables
-WHERE schemaname = 'public'
-  AND tablename IN ('tenants', 'warehouses', 'products', 'locations', 'inventory', 'arrival_plans', 'shipping_orders');
+-- ─── マスタ系テーブル ──────────────────────────────────────────
 
--- 既存ポリシーの確認
-SELECT
-  schemaname,
-  tablename,
-  policyname,
-  permissive,
-  roles,
-  cmd,
-  qual
-FROM pg_policies
-WHERE schemaname = 'public'
-ORDER BY tablename, policyname;
+CREATE POLICY "anon read tenants"
+  ON tenants FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read warehouses"
+  ON warehouses FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read products"
+  ON products FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read suppliers"
+  ON suppliers FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read customers"
+  ON customers FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read locations"
+  ON locations FOR SELECT TO anon USING (true);
+
+
+-- ─── 入庫系テーブル ────────────────────────────────────────────
+
+CREATE POLICY "anon read arrival_headers"
+  ON arrival_headers FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read arrival_lines"
+  ON arrival_lines FOR SELECT TO anon USING (true);
+
+
+-- ─── 在庫テーブル ──────────────────────────────────────────────
+
+CREATE POLICY "anon read inventory"
+  ON inventory FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read inventory_transactions"
+  ON inventory_transactions FOR SELECT TO anon USING (true);
+
+
+-- ─── 出庫系テーブル ────────────────────────────────────────────
+
+CREATE POLICY "anon read shipping_headers"
+  ON shipping_headers FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read shipping_lines"
+  ON shipping_lines FOR SELECT TO anon USING (true);
+
+CREATE POLICY "anon read shipping_allocations"
+  ON shipping_allocations FOR SELECT TO anon USING (true);
+
+
+-- ─── 書き込み系ポリシー（INSERT / UPDATE） ────────────────────
+-- SELECT だけでなく書き込みも必要なテーブルに追加します。
+
+CREATE POLICY "anon write arrival_headers"
+  ON arrival_headers FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write arrival_lines"
+  ON arrival_lines FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write inventory"
+  ON inventory FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write inventory_transactions"
+  ON inventory_transactions FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write shipping_headers"
+  ON shipping_headers FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write shipping_lines"
+  ON shipping_lines FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write shipping_allocations"
+  ON shipping_allocations FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write products"
+  ON products FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write suppliers"
+  ON suppliers FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write customers"
+  ON customers FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "anon write locations"
+  ON locations FOR ALL TO anon USING (true) WITH CHECK (true);
 
 
 -- =============================================================
--- ─── 2a. 開発環境向け：RLS を無効化（最もシンプル）─────────────
---
--- Supabase anon キーで全データを参照できるようになります。
--- 本番環境では使用しないでください。
+-- 確認クエリ（実行後にポリシーが追加されたことを確認）
 -- =============================================================
-
-ALTER TABLE tenants    DISABLE ROW LEVEL SECURITY;
-ALTER TABLE warehouses DISABLE ROW LEVEL SECURITY;
-
-
--- =============================================================
--- ─── 2b. 本番環境向け：全員 SELECT 可 ポリシーを追加 ───────────
---
--- RLS は維持しつつ、anon/authenticated どちらも参照可能にします。
--- INSERT / UPDATE / DELETE は別途制御してください。
--- =============================================================
-
--- (2a を実行した場合は不要。どちらか一方を実行してください)
-
--- ALTER TABLE tenants    ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE warehouses ENABLE ROW LEVEL SECURITY;
-
--- DROP POLICY IF EXISTS "allow_select_tenants"    ON tenants;
--- DROP POLICY IF EXISTS "allow_select_warehouses" ON warehouses;
-
--- CREATE POLICY "allow_select_tenants"
---   ON tenants FOR SELECT
---   USING (true);
-
--- CREATE POLICY "allow_select_warehouses"
---   ON warehouses FOR SELECT
---   USING (true);
+-- SELECT schemaname, tablename, policyname, roles, cmd
+-- FROM pg_policies
+-- WHERE schemaname = 'public'
+-- ORDER BY tablename, policyname;

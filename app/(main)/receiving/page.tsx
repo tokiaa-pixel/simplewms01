@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { PackageCheck, CheckCircle, Loader2, AlertCircle } from 'lucide-react'
+import { PackageCheck, CheckCircle, Loader2, AlertCircle, ChevronRight } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/lib/i18n'
 import {
@@ -11,14 +11,13 @@ import {
   INVENTORY_STATUS_CONFIG,
 } from '@/lib/types'
 import {
-  type ArrivalDisplay,
-  fetchArrivals,
-  confirmArrivalReceiving,
-} from '@/lib/supabase/queries/receiving'
-import {
+  type ArrivalGroup,
+  type ArrivalLineItem,
   type LocationOption,
+  fetchArrivalGroups,
   fetchLocationOptions,
 } from '@/lib/supabase/queries/arrivals'
+import { confirmArrivalReceiving } from '@/lib/supabase/queries/receiving'
 import { useTenant } from '@/store/TenantContext'
 import ScopeRequired from '@/components/ui/ScopeRequired'
 
@@ -26,11 +25,21 @@ import ScopeRequired from '@/components/ui/ScopeRequired'
 // ユーティリティ
 // =============================================================
 
-function calcProgress(item: ArrivalDisplay) {
-  const pct = item.plannedQty > 0
-    ? Math.min((item.receivedQty / item.plannedQty) * 100, 100)
-    : 0
-  return { total: item.plannedQty, received: item.receivedQty, pct }
+/** lines から header ステータスを算出 */
+function deriveGroupStatus(lines: ArrivalLineItem[]): ArrivalStatus {
+  const active = lines.filter((l) => l.status !== 'cancelled')
+  if (active.length === 0) return 'cancelled'
+  if (active.every((l) => l.status === 'completed')) return 'completed'
+  if (active.some((l) => l.status === 'completed' || l.receivedQty > 0)) return 'partial'
+  return 'pending'
+}
+
+/** lines から全体進捗を算出 */
+function calcGroupProgress(lines: ArrivalLineItem[]) {
+  const total    = lines.reduce((s, l) => s + l.scheduledQty, 0)
+  const received = lines.reduce((s, l) => s + l.receivedQty,  0)
+  const pct = total > 0 ? Math.min((received / total) * 100, 100) : 0
+  return { total, received, pct }
 }
 
 // =============================================================
@@ -73,10 +82,7 @@ function ProgressBar({
   return (
     <div className="flex items-center gap-2">
       <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden flex-shrink-0">
-        <div
-          className={`h-full rounded-full transition-all ${barColor}`}
-          style={{ width: `${pct}%` }}
-        />
+        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap">
         {received} / {total}
@@ -86,71 +92,96 @@ function ProgressBar({
 }
 
 // =============================================================
-// 入庫処理モーダル
+// 入庫処理モーダル（ヘッダー単位・全明細表示）
 // =============================================================
 
-function ReceivingModal({
-  arrival,
+type LineInput = {
+  qty:               string
+  locationId:        string
+  inventoryStatus:   InventoryStatus
+  submitting:        boolean
+  error:             string
+  locationError:     string
+  lastConfirmedQty:  number | null
+  confirmedLocation: string
+}
+
+function initLineInputs(lines: ArrivalLineItem[]): Record<string, LineInput> {
+  return Object.fromEntries(
+    lines.map((l) => [l.id, {
+      qty:               '',
+      locationId:        l.locationId ?? '',
+      inventoryStatus:   'available' as InventoryStatus,
+      submitting:        false,
+      error:             '',
+      locationError:     '',
+      lastConfirmedQty:  null,
+      confirmedLocation: '',
+    }])
+  )
+}
+
+function ReceivingGroupModal({
+  group,
   locations,
-  initialLocationId,
-  onLocationChange,
   onClose,
-  onConfirmed,
+  onGroupUpdated,
 }: {
-  arrival:            ArrivalDisplay
-  locations:          LocationOption[]
-  initialLocationId:  string            // 親が保持する明細ごとの前回選択値
-  onLocationChange:   (id: string) => void
-  onClose:            () => void
-  onConfirmed:        () => void
+  group:          ArrivalGroup
+  locations:      LocationOption[]
+  onClose:        () => void
+  onGroupUpdated: (updated: ArrivalGroup) => void
 }) {
-  const { t }  = useTranslation('receiving')
-  const { t: tc } = useTranslation('common')
-  const { scope } = useTenant()
+  const { t }      = useTranslation('receiving')
+  const { t: tc }  = useTranslation('common')
+  const { scope }  = useTenant()
 
-  // ── ローカル state（楽観的更新で即時反映） ────────────────
-  const [currentArrival, setCurrentArrival] = useState<ArrivalDisplay>(arrival)
-  const remaining  = currentArrival.plannedQty - currentArrival.receivedQty
-  const isReadOnly = currentArrival.status === 'completed' || currentArrival.status === 'cancelled'
+  const [localLines, setLocalLines] = useState<ArrivalLineItem[]>(group.lines)
+  const [lineInputs, setLineInputs] = useState<Record<string, LineInput>>(() =>
+    initLineInputs(group.lines)
+  )
 
-  const [inputQty,           setInputQty]           = useState('')
-  // 保管場所：親が明細 id をキーに保持する前回選択値を初期値として使用
-  const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId)
-  const [inventoryStatus,    setInventoryStatus]    = useState<InventoryStatus>('available')
-  const [submitting,         setSubmitting]         = useState(false)
-  const [error,              setError]              = useState('')
-  const [locationError,      setLocationError]      = useState('')   // 保管場所専用インラインエラー
-  const [confirmed,          setConfirmed]          = useState(false)
-  const [lastConfirmedQty,   setLastConfirmedQty]   = useState<number | null>(null)
-  const [confirmedLocation,  setConfirmedLocation]  = useState('')
+  const localStatus = deriveGroupStatus(localLines)
+  const progress    = calcGroupProgress(localLines)
 
-  // 確定時に表示する location_code（selectedLocationId から逆引き）
-  const selectedLocationCode = locations.find((l) => l.id === selectedLocationId)?.code ?? ''
+  const updateInput = useCallback(<K extends keyof LineInput>(
+    lineId: string,
+    key: K,
+    value: LineInput[K],
+  ) => {
+    setLineInputs((prev) => ({
+      ...prev,
+      [lineId]: { ...prev[lineId], [key]: value },
+    }))
+  }, [])
 
-  const handleConfirm = async () => {
-    const qty = Math.floor(Number(inputQty))
+  const handleConfirmLine = useCallback(async (line: ArrivalLineItem) => {
+    const input = lineInputs[line.id]
+    if (!input || !scope) return
 
-    // ── バリデーション ──────────────────────────────────────
-    if (!inputQty || isNaN(qty) || qty <= 0) {
-      setError(t('errNoQty'))
-      return
+    const qty       = Math.floor(Number(input.qty))
+    const remaining = line.scheduledQty - line.receivedQty
+
+    // バリデーション
+    let hasError = false
+    if (!input.qty || isNaN(qty) || qty <= 0) {
+      updateInput(line.id, 'error', t('errNoQty'))
+      hasError = true
+    } else if (qty > remaining) {
+      updateInput(line.id, 'error', `${t('errOverflow')} (${remaining})`)
+      hasError = true
     }
-    if (qty > remaining) {
-      setError(`${t('errOverflow')} (${remaining})`)
-      return
+    if (!input.locationId) {
+      updateInput(line.id, 'locationError', '保管場所を選択してください')
+      hasError = true
     }
-    if (!selectedLocationId) {
-      setLocationError('保管場所を選択してください')
-      return
-    }
+    if (hasError) return
 
-    setSubmitting(true)
-    setError('')
-    setLocationError('')
+    updateInput(line.id, 'submitting', true)
+    updateInput(line.id, 'error', '')
+    updateInput(line.id, 'locationError', '')
 
-    const newTotalReceived = currentArrival.receivedQty + qty
-    const isComplete       = newTotalReceived >= currentArrival.plannedQty
-
+    const newTotalReceived = line.receivedQty + qty
     const today = new Date()
     const receivedDate = [
       today.getFullYear(),
@@ -158,277 +189,293 @@ function ReceivingModal({
       String(today.getDate()).padStart(2, '0'),
     ].join('-')
 
-    if (!scope) { setSubmitting(false); return }
-
     const { error: err } = await confirmArrivalReceiving({
-      lineId:           currentArrival.id,
-      headerId:         currentArrival.headerId,
-      productId:        currentArrival.productId,
-      locationId:       selectedLocationId,
+      lineId:           line.id,
+      headerId:         group.id,
+      productId:        line.productId,
+      locationId:       input.locationId,
       addQty:           qty,
-      totalPlannedQty:  currentArrival.plannedQty,
+      totalPlannedQty:  line.scheduledQty,
       totalReceivedQty: newTotalReceived,
-      inventoryStatus,
+      inventoryStatus:  input.inventoryStatus,
       receivedDate,
       scope,
     })
 
-    setSubmitting(false)
-
     if (err) {
-      setError(err)
+      setLineInputs((prev) => ({
+        ...prev,
+        [line.id]: { ...prev[line.id], submitting: false, error: err },
+      }))
       return
     }
 
-    // ── 楽観的更新：DB成功後に即時反映 ────────────────────
-    setCurrentArrival({
-      ...currentArrival,
-      receivedQty: newTotalReceived,
-      status:      isComplete ? 'completed' : 'partial',
-    })
-    setLastConfirmedQty(qty)
-    setConfirmedLocation(selectedLocationCode)
-    setInputQty('')
-    setInventoryStatus('available')
-    // 保管場所は連続入庫のため選択値を維持する
+    // 楽観的更新
+    const isLineComplete      = newTotalReceived >= line.scheduledQty
+    const confirmedLocationCode = locations.find((l) => l.id === input.locationId)?.code ?? ''
 
-    if (isComplete) setConfirmed(true)
-    onConfirmed()
-  }
-
-  // ── 完了画面（全数入庫後） ───────────────────────────────
-  if (confirmed) {
-    return (
-      <Modal
-        title={`${t('modalTitle')} - ${currentArrival.arrivalNo}`}
-        onClose={onClose}
-        size="md"
-        locked={false}
-      >
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <CheckCircle size={40} className="text-green-500" />
-          <p className="text-sm font-semibold text-slate-700">入庫確定しました ✓</p>
-          <p className="text-xs text-slate-500">{currentArrival.arrivalNo}</p>
-          <p className="text-xs text-slate-400">
-            {currentArrival.productCode} — {lastConfirmedQty}{currentArrival.unit} を
-            {confirmedLocation} に入庫
-          </p>
-          <button
-            onClick={onClose}
-            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
-          >
-            {tc('close')}
-          </button>
-        </div>
-      </Modal>
+    const updatedLines = localLines.map((l) =>
+      l.id === line.id
+        ? {
+            ...l,
+            receivedQty: newTotalReceived,
+            status: isLineComplete ? ('completed' as ArrivalStatus) : ('partial' as ArrivalStatus),
+          }
+        : l
     )
-  }
+    setLocalLines(updatedLines)
 
-  // ── 入力画面 ─────────────────────────────────────────────
+    setLineInputs((prev) => ({
+      ...prev,
+      [line.id]: {
+        ...prev[line.id],
+        submitting:        false,
+        qty:               '',
+        lastConfirmedQty:  qty,
+        confirmedLocation: confirmedLocationCode,
+        error:             '',
+        locationError:     '',
+      },
+    }))
+
+    // 親リストを即時更新
+    onGroupUpdated({
+      ...group,
+      lines:  updatedLines,
+      status: deriveGroupStatus(updatedLines),
+    })
+  }, [lineInputs, localLines, scope, group, locations, t, updateInput, onGroupUpdated])
+
   return (
     <Modal
-      title={`${t('modalTitle')} - ${currentArrival.arrivalNo}`}
+      title={`入庫処理 — ${group.arrivalNo}`}
       onClose={onClose}
-      size="lg"
-      locked={submitting}
+      size="xl"
     >
-      {submitting && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-[2px] rounded-xl">
-          <Loader2 size={32} className="animate-spin text-brand-navy" />
-          <p className="text-sm font-medium text-slate-600">処理中...</p>
-          <p className="text-xs text-slate-400">完了するまでお待ちください</p>
-        </div>
-      )}
+      <div className="space-y-4">
 
-      <div className="space-y-5">
-
-        {/* 一部入庫完了フラッシュ */}
-        {lastConfirmedQty !== null && (
-          <div className="bg-green-50 border border-green-200 rounded-md px-3 py-2 flex items-center gap-2 text-xs text-green-700">
-            <CheckCircle size={14} className="flex-shrink-0 text-green-500" />
-            <span>
-              <strong>{lastConfirmedQty}{currentArrival.unit}</strong> を {confirmedLocation} に入庫しました。
-              残り <strong>{remaining}{currentArrival.unit}</strong> です。
-            </span>
-          </div>
-        )}
-
-        {/* 入荷情報サマリ */}
-        <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
+        {/* ヘッダー情報 */}
+        <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2">
           {([
-            [t('detailSupplier'), currentArrival.supplierName],
-            [t('detailStatus'),   <ArrivalStatusBadge key="badge" status={currentArrival.status} />],
-            [t('detailDate'),     currentArrival.arrivalDate],
-            [t('detailProgress'), `${currentArrival.receivedQty} / ${currentArrival.plannedQty} ${currentArrival.unit}`],
-          ] as [string, React.ReactNode][]).map(([label, value], i) => (
-            <div key={i} className="flex items-center gap-2">
-              <dt className="text-xs text-slate-500 w-20 flex-shrink-0">{label}</dt>
-              <dd className="text-xs text-slate-800 font-medium">{value}</dd>
+            ['仕入先',     group.supplierName],
+            ['入荷予定日', group.arrivalDate],
+            ['明細件数',   `${localLines.length} 件`],
+          ] as [string, string][]).map(([label, value]) => (
+            <div key={label} className="flex flex-col gap-0.5">
+              <dt className="text-[10px] text-slate-400 uppercase tracking-wide">{label}</dt>
+              <dd className="text-xs font-medium text-slate-800">{value}</dd>
             </div>
           ))}
+          <div className="flex flex-col gap-0.5">
+            <dt className="text-[10px] text-slate-400 uppercase tracking-wide">ステータス</dt>
+            <dd><ArrivalStatusBadge status={localStatus} /></dd>
+          </div>
         </div>
 
-        {currentArrival.memo && (
+        {/* 全体進捗 */}
+        <div className="flex items-center gap-3 px-1">
+          <span className="text-xs text-slate-500 flex-shrink-0 w-16">全体進捗</span>
+          <ProgressBar {...progress} status={localStatus} />
+        </div>
+
+        {/* メモ */}
+        {group.memo && (
           <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-700">
-            {currentArrival.memo}
+            {group.memo}
           </div>
         )}
 
-        {/* 商品明細テーブル */}
+        {/* 入庫済みフラッシュ */}
+        {Object.entries(lineInputs).some(([, v]) => v.lastConfirmedQty !== null) && (
+          <div className="space-y-1">
+            {Object.entries(lineInputs)
+              .filter(([, v]) => v.lastConfirmedQty !== null)
+              .map(([lineId, v]) => {
+                const line = localLines.find((l) => l.id === lineId)
+                if (!line) return null
+                return (
+                  <div key={lineId} className="bg-green-50 border border-green-200 rounded-md px-3 py-2 flex items-center gap-2 text-xs text-green-700">
+                    <CheckCircle size={12} className="flex-shrink-0 text-green-500" />
+                    <span>
+                      <strong>{line.productCode}</strong> — {v.lastConfirmedQty}{line.unit} を
+                      {v.confirmedLocation} に入庫しました
+                    </span>
+                  </div>
+                )
+              })}
+          </div>
+        )}
+
+        {/* 明細テーブル */}
         <div className="border border-slate-200 rounded-lg overflow-x-auto">
-          <table className="w-full text-xs min-w-[520px]">
+          <table className="w-full text-xs min-w-[720px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
-                <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblScheduled')}</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblReceived')}</th>
-                <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblRemaining')}</th>
-                {!isReadOnly && (
-                  <th className="px-4 py-2.5 text-right font-medium text-slate-500 whitespace-nowrap">
-                    {t('tblThisReceiving')}
-                  </th>
-                )}
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <th className="px-3 py-2.5 text-left font-semibold">商品コード</th>
+                <th className="px-3 py-2.5 text-left font-semibold">商品名</th>
+                <th className="px-3 py-2.5 text-right font-semibold">予定数</th>
+                <th className="px-3 py-2.5 text-right font-semibold">入庫済</th>
+                <th className="px-3 py-2.5 text-right font-semibold">残り</th>
+                <th className="px-3 py-2.5 text-left font-semibold min-w-[150px]">保管場所</th>
+                <th className="px-3 py-2.5 text-left font-semibold min-w-[160px]">在庫ステータス</th>
+                <th className="px-3 py-2.5 text-right font-semibold min-w-[72px]">今回数量</th>
+                <th className="px-3 py-2.5 text-center font-semibold min-w-[72px]"></th>
               </tr>
             </thead>
-            <tbody>
-              <tr className={remaining === 0 ? 'bg-green-50/30 opacity-70' : ''}>
-                <td className="px-4 py-3 font-mono text-blue-600">{currentArrival.productCode}</td>
-                <td className="px-4 py-3 text-slate-700">{currentArrival.productName}</td>
-                <td className="px-4 py-3 text-right tabular-nums">{currentArrival.plannedQty}</td>
-                <td className="px-4 py-3 text-right tabular-nums text-green-700 font-medium">
-                  {currentArrival.receivedQty}
-                </td>
-                <td className={`px-4 py-3 text-right tabular-nums font-medium ${
-                  remaining === 0 ? 'text-green-600' : 'text-amber-600'
-                }`}>
-                  {remaining === 0 ? '✓' : remaining}
-                </td>
-                {!isReadOnly && (
-                  <td className="px-4 py-3 text-right">
-                    {remaining === 0 ? (
-                      <span className="text-green-500 text-xs">{t('qtyDone')}</span>
+            <tbody className="divide-y divide-slate-100">
+              {localLines.map((line) => {
+                const input      = lineInputs[line.id]
+                if (!input) return null
+                const remaining  = line.scheduledQty - line.receivedQty
+                const isReadOnly = line.status === 'completed' || line.status === 'cancelled'
+
+                return (
+                  <tr
+                    key={line.id}
+                    className={isReadOnly ? 'bg-slate-50/60 opacity-70' : ''}
+                  >
+                    {/* 商品コード */}
+                    <td className="px-3 py-2.5 font-mono text-blue-600 whitespace-nowrap">
+                      {line.productCode}
+                    </td>
+                    {/* 商品名 */}
+                    <td className="px-3 py-2.5 text-slate-700">{line.productName}</td>
+                    {/* 予定数 */}
+                    <td className="px-3 py-2.5 text-right tabular-nums">{line.scheduledQty}</td>
+                    {/* 入庫済 */}
+                    <td className="px-3 py-2.5 text-right tabular-nums text-green-700 font-medium">
+                      {line.receivedQty}
+                    </td>
+                    {/* 残り */}
+                    <td className={`px-3 py-2.5 text-right tabular-nums font-medium ${
+                      remaining === 0 ? 'text-green-600' : 'text-amber-600'
+                    }`}>
+                      {remaining === 0 ? '✓' : remaining}
+                    </td>
+
+                    {isReadOnly ? (
+                      <>
+                        <td className="px-3 py-2.5 text-slate-400">{line.locationCode || '—'}</td>
+                        <td className="px-3 py-2.5 text-slate-400">—</td>
+                        <td className="px-3 py-2.5" />
+                        <td className="px-3 py-2.5 text-center">
+                          {line.status === 'completed' && (
+                            <CheckCircle size={14} className="text-green-500 mx-auto" />
+                          )}
+                        </td>
+                      </>
                     ) : (
-                      <input
-                        type="number"
-                        min="1"
-                        max={remaining}
-                        value={inputQty}
-                        onChange={(e) => {
-                          setInputQty(e.target.value)
-                          setError('')
-                          if (lastConfirmedQty !== null) setLastConfirmedQty(null)
-                        }}
-                        placeholder="0"
-                        className="w-20 border border-slate-300 rounded px-2 py-2 text-right focus:outline-none focus:ring-2 focus:ring-brand-teal"
-                      />
+                      <>
+                        {/* 保管場所 */}
+                        <td className="px-2 py-2">
+                          <select
+                            value={input.locationId}
+                            onChange={(e) => {
+                              updateInput(line.id, 'locationId', e.target.value)
+                              updateInput(line.id, 'locationError', '')
+                            }}
+                            className={`w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-teal bg-white ${
+                              input.locationError   ? 'border-red-400 bg-red-50' :
+                              !input.locationId     ? 'border-amber-300 bg-amber-50' :
+                                                      'border-slate-300'
+                            }`}
+                          >
+                            <option value="">— 選択 —</option>
+                            {locations.map((l) => (
+                              <option key={l.id} value={l.id}>{l.code}　{l.name}</option>
+                            ))}
+                          </select>
+                          {input.locationError && (
+                            <p className="text-[10px] text-red-600 mt-0.5 whitespace-nowrap">
+                              {input.locationError}
+                            </p>
+                          )}
+                        </td>
+
+                        {/* 在庫ステータス */}
+                        <td className="px-2 py-2">
+                          <div className="flex gap-1 flex-wrap">
+                            {(Object.keys(INVENTORY_STATUS_CONFIG) as InventoryStatus[]).map((key) => {
+                              const cfg      = INVENTORY_STATUS_CONFIG[key]
+                              const isActive = input.inventoryStatus === key
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  onClick={() => updateInput(line.id, 'inventoryStatus', key)}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ring-1 transition-all ${
+                                    isActive
+                                      ? cfg.badgeClass + ' ring-offset-1'
+                                      : 'bg-white text-slate-500 ring-slate-200 hover:ring-slate-300'
+                                  }`}
+                                >
+                                  {cfg.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </td>
+
+                        {/* 今回数量 */}
+                        <td className="px-2 py-2">
+                          {remaining === 0 ? (
+                            <span className="text-green-600 text-[10px] block text-right">完了</span>
+                          ) : (
+                            <div>
+                              <input
+                                type="number"
+                                min="1"
+                                max={remaining}
+                                value={input.qty}
+                                onChange={(e) => {
+                                  updateInput(line.id, 'qty', e.target.value)
+                                  updateInput(line.id, 'error', '')
+                                }}
+                                placeholder="0"
+                                className="w-16 border border-slate-300 rounded px-2 py-1 text-right text-xs focus:outline-none focus:ring-1 focus:ring-brand-teal"
+                              />
+                              {input.error && (
+                                <p className="text-[10px] text-red-600 mt-0.5 whitespace-nowrap">
+                                  {input.error}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* 入庫確定ボタン */}
+                        <td className="px-2 py-2 text-center">
+                          {remaining > 0 && (
+                            <button
+                              onClick={() => handleConfirmLine(line)}
+                              disabled={input.submitting}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-brand-navy text-white text-[10px] font-medium rounded hover:bg-brand-navy-mid transition-colors disabled:opacity-50 whitespace-nowrap"
+                            >
+                              {input.submitting
+                                ? <Loader2 size={10} className="animate-spin" />
+                                : <PackageCheck size={10} />
+                              }
+                              入庫確定
+                            </button>
+                          )}
+                        </td>
+                      </>
                     )}
-                  </td>
-                )}
-              </tr>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
 
-        {/* 保管場所選択 */}
-        {!isReadOnly && remaining > 0 && (
-          <div className="space-y-1">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <label className="text-xs font-medium text-slate-600 flex-shrink-0 sm:w-20">
-                {t('tblLocation')} <span className="text-red-500">*</span>
-              </label>
-              <div className="flex-1 space-y-1">
-                <select
-                  value={selectedLocationId}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    setSelectedLocationId(id)
-                    onLocationChange(id)    // 親に通知して次回選択値を保持
-                    setLocationError('')
-                    setError('')
-                  }}
-                  className={`w-full border rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white ${
-                    locationError ? 'border-red-400 bg-red-50' :
-                    !selectedLocationId ? 'border-amber-300 bg-amber-50' : 'border-slate-300'
-                  }`}
-                >
-                  <option value="">— 保管場所を選択してください —</option>
-                  {locations.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.code}　{l.name}
-                    </option>
-                  ))}
-                </select>
-                {locationError && (
-                  <p className="text-[11px] text-red-600 flex items-center gap-1">
-                    <AlertCircle size={11} className="flex-shrink-0" />
-                    {locationError}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 在庫ステータス選択 */}
-        {!isReadOnly && remaining > 0 && (
-          <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-500 flex-shrink-0">在庫ステータス</label>
-            <div className="flex gap-2 flex-wrap">
-              {(Object.keys(INVENTORY_STATUS_CONFIG) as InventoryStatus[]).map((key) => {
-                const cfg     = INVENTORY_STATUS_CONFIG[key]
-                const isActive = inventoryStatus === key
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setInventoryStatus(key)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium ring-1 transition-all ${
-                      isActive
-                        ? cfg.badgeClass + ' ring-offset-1 shadow-sm'
-                        : 'bg-white text-slate-500 ring-slate-200 hover:ring-slate-300'
-                    }`}
-                  >
-                    <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${isActive ? cfg.dotClass : 'bg-slate-300'}`} />
-                    {cfg.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* エラー表示 */}
-        {error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 flex items-center gap-2">
-            <AlertCircle size={14} className="flex-shrink-0" />
-            {error}
-          </p>
-        )}
-
-        {/* フッターボタン */}
-        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
+        {/* フッター */}
+        <div className="flex justify-end pt-1 border-t border-slate-100">
           <button
             onClick={onClose}
-            disabled={submitting}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
-            {isReadOnly ? tc('close') : tc('cancel')}
+            {tc('close')}
           </button>
-          {!isReadOnly && remaining > 0 && (
-            <button
-              onClick={handleConfirm}
-              disabled={submitting}
-              className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {submitting ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <PackageCheck size={15} />
-              )}
-              {t('confirmBtn')}
-            </button>
-          )}
         </div>
 
       </div>
@@ -441,46 +488,43 @@ function ReceivingModal({
 // =============================================================
 
 export default function ReceivingPage() {
-  const { t }  = useTranslation('receiving')
-  const { t: tc } = useTranslation('common')
-  const { t: ts } = useTranslation('status')
-  const { scope } = useTenant()
+  const { t }      = useTranslation('receiving')
+  const { t: tc }  = useTranslation('common')
+  const { t: ts }  = useTranslation('status')
+  const { scope }  = useTenant()
 
-  const [arrivals, setArrivals]         = useState<ArrivalDisplay[]>([])
-  const [locations, setLocations]       = useState<LocationOption[]>([])
-  // 明細 id をキーに、前回選択した保管場所 id を保持する
-  const [locationSelections, setLocationSelections] = useState<Record<string, string>>({})
-  const [loading, setLoading]           = useState(true)
-  const [fetchError, setFetchError]     = useState<string | null>(null)
+  const [groups,       setGroups]       = useState<ArrivalGroup[]>([])
+  const [locations,    setLocations]    = useState<LocationOption[]>([])
+  const [loading,      setLoading]      = useState(true)
+  const [fetchError,   setFetchError]   = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'all' | 'active'>('active')
-  const [selected, setSelected]         = useState<ArrivalDisplay | null>(null)
+  const [selected,     setSelected]     = useState<ArrivalGroup | null>(null)
 
-  // ── データ取得 ─────────────────────────────────────────────
-  const loadArrivals = useCallback(async () => {
+  // ── データ取得 ──────────────────────────────────────────────
+  const loadGroups = useCallback(async () => {
     if (!scope) { setLoading(false); return }
     setLoading(true)
     setFetchError(null)
-    const [arrivalsRes, locationsRes] = await Promise.all([
-      fetchArrivals(scope),
+    const [groupsRes, locationsRes] = await Promise.all([
+      fetchArrivalGroups(scope),
       fetchLocationOptions(scope.warehouseId),
     ])
-    if (arrivalsRes.error) setFetchError(arrivalsRes.error)
-    else setArrivals(arrivalsRes.data)
+    if (groupsRes.error) setFetchError(groupsRes.error)
+    else setGroups(groupsRes.data)
     setLocations(locationsRes.data)
     setLoading(false)
   }, [scope])
 
-  useEffect(() => {
-    loadArrivals()
-  }, [loadArrivals])
+  useEffect(() => { loadGroups() }, [loadGroups])
 
-  // 確定後のバックグラウンド更新（ローダー表示なし・selected は維持）
-  const handleConfirmed = useCallback(async () => {
-    if (!scope) return
-    const { data, error } = await fetchArrivals(scope)
-    if (!error) setArrivals(data)
-  }, [scope])
+  // ── 入庫確定後の即時反映（モーダルから呼ばれる） ──────────
+  const handleGroupUpdated = useCallback((updated: ArrivalGroup) => {
+    setGroups((prev) => prev.map((g) => g.id === updated.id ? updated : g))
+    // 開いているモーダルの group 参照も更新（ステータス表示のため）
+    setSelected((prev) => prev?.id === updated.id ? { ...prev, ...updated } : prev)
+  }, [])
 
+  // ── フィルタ ─────────────────────────────────────────────
   const statusFilterOptions = [
     { value: 'all'       as const, label: t('filterAll') },
     { value: 'active'    as const, label: t('filterActive') },
@@ -490,17 +534,17 @@ export default function ReceivingPage() {
   ]
 
   const filtered = useMemo(() => {
-    return arrivals.filter((a) => {
+    return groups.filter((g) => {
       if (statusFilter === 'all')    return true
-      if (statusFilter === 'active') return a.status === 'pending' || a.status === 'partial'
-      return a.status === statusFilter
+      if (statusFilter === 'active') return g.status === 'pending' || g.status === 'partial'
+      return g.status === statusFilter
     })
-  }, [arrivals, statusFilter])
+  }, [groups, statusFilter])
 
   const counts = useMemo(() => ({
-    pending: arrivals.filter((a) => a.status === 'pending').length,
-    partial: arrivals.filter((a) => a.status === 'partial').length,
-  }), [arrivals])
+    pending: groups.filter((g) => g.status === 'pending').length,
+    partial: groups.filter((g) => g.status === 'partial').length,
+  }), [groups])
 
   // ── スコープ未選択 ───────────────────────────────────────
   if (!scope) return <ScopeRequired />
@@ -534,10 +578,7 @@ export default function ReceivingPage() {
           <div>
             <p className="text-sm font-semibold">データの取得に失敗しました</p>
             <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
-            <button
-              onClick={loadArrivals}
-              className="mt-3 text-xs text-red-600 underline hover:no-underline"
-            >
+            <button onClick={loadGroups} className="mt-3 text-xs text-red-600 underline hover:no-underline">
               再試行
             </button>
           </div>
@@ -556,8 +597,6 @@ export default function ReceivingPage() {
           <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
           <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
         </div>
-
-        {/* 対応件数サマリ */}
         <div className="flex flex-wrap gap-2 sm:gap-3">
           {counts.pending > 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 rounded-lg">
@@ -604,32 +643,27 @@ export default function ReceivingPage() {
               <PackageCheck size={28} />
               <p className="text-sm">{t('empty')}</p>
             </div>
-          ) : (
-            filtered.map((arrival) => {
-              const progress    = calcProgress(arrival)
-              const isCompleted = arrival.status === 'completed'
-              return (
-                <div
-                  key={arrival.id}
-                  onClick={() => setSelected(arrival)}
-                  className={`px-4 py-4 cursor-pointer active:bg-blue-50/70 ${isCompleted ? 'opacity-60' : ''}`}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <span className="font-mono text-xs text-blue-600 font-medium">{arrival.arrivalNo}</span>
-                    <ArrivalStatusBadge status={arrival.status} />
-                  </div>
-                  <p className="text-sm font-medium text-slate-700 mb-0.5">{arrival.supplierName}</p>
-                  <p className="text-xs text-slate-500 mb-2">
-                    {arrival.productCode} {arrival.productName}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <ProgressBar {...progress} status={arrival.status} />
-                    <span className="text-xs text-slate-500">{arrival.arrivalDate}</span>
-                  </div>
+          ) : filtered.map((group) => {
+            const progress    = calcGroupProgress(group.lines)
+            const isCompleted = group.status === 'completed'
+            return (
+              <div
+                key={group.id}
+                onClick={() => setSelected(group)}
+                className={`px-4 py-4 cursor-pointer active:bg-blue-50/70 ${isCompleted ? 'opacity-60' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <span className="font-mono text-xs text-blue-600 font-medium">{group.arrivalNo}</span>
+                  <ArrivalStatusBadge status={group.status} />
                 </div>
-              )
-            })
-          )}
+                <p className="text-sm font-medium text-slate-700 mb-0.5">{group.supplierName}</p>
+                <p className="text-xs text-slate-500 mb-2">
+                  {group.lines.length} 件 · {group.arrivalDate}
+                </p>
+                <ProgressBar {...progress} status={group.status} />
+              </div>
+            )
+          })}
         </div>
 
         {/* デスクトップ：テーブル表示 */}
@@ -637,57 +671,74 @@ export default function ReceivingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
-                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colCode')}</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">{t('colSupplier')}</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">商品</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colDate')}</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colProgress')}</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colStatus')}</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  {t('colCode')}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
+                  {t('colSupplier')}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  {t('colDate')}
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  明細件数
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  {t('colProgress')}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  {t('colStatus')}
+                </th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center">
+                  <td colSpan={7} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <PackageCheck size={28} />
                       <p className="text-sm">{t('empty')}</p>
                     </div>
                   </td>
                 </tr>
-              ) : (
-                filtered.map((arrival) => {
-                  const progress    = calcProgress(arrival)
-                  const isCompleted = arrival.status === 'completed'
-                  return (
-                    <tr
-                      key={arrival.id}
-                      onClick={() => setSelected(arrival)}
-                      className={`cursor-pointer transition-colors ${
-                        isCompleted
-                          ? 'hover:bg-slate-50/50 opacity-60'
-                          : 'hover:bg-blue-50/50'
-                      }`}
-                    >
-                      <td className="px-5 py-3 whitespace-nowrap">
-                        <span className="font-mono text-xs text-blue-600 font-medium">{arrival.arrivalNo}</span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{arrival.supplierName}</td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-slate-500">{arrival.productCode}</span>
-                        <span className="ml-2 text-xs text-slate-700">{arrival.productName}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">{arrival.arrivalDate}</td>
-                      <td className="px-4 py-3">
-                        <ProgressBar {...progress} status={arrival.status} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <ArrivalStatusBadge status={arrival.status} />
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
+              ) : filtered.map((group) => {
+                const progress    = calcGroupProgress(group.lines)
+                const isCompleted = group.status === 'completed'
+                return (
+                  <tr
+                    key={group.id}
+                    onClick={() => setSelected(group)}
+                    className={`cursor-pointer transition-colors ${
+                      isCompleted
+                        ? 'hover:bg-slate-50/50 opacity-60'
+                        : 'hover:bg-blue-50/50'
+                    }`}
+                  >
+                    <td className="px-5 py-3 whitespace-nowrap">
+                      <span className="font-mono text-xs text-blue-600 font-medium">{group.arrivalNo}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{group.supplierName}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">
+                      {group.arrivalDate}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                        {group.lines.length}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <ProgressBar {...progress} status={group.status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <ArrivalStatusBadge status={group.status} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      <ChevronRight size={14} />
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -695,17 +746,14 @@ export default function ReceivingPage() {
 
       {/* 入庫処理モーダル */}
       {selected && (
-        <ReceivingModal
-          arrival={selected}
+        <ReceivingGroupModal
+          group={selected}
           locations={locations}
-          initialLocationId={locationSelections[selected.id] ?? selected.locationId ?? ''}
-          onLocationChange={(id) =>
-            setLocationSelections((prev) => ({ ...prev, [selected.id]: id }))
-          }
           onClose={() => setSelected(null)}
-          onConfirmed={handleConfirmed}
+          onGroupUpdated={handleGroupUpdated}
         />
       )}
+
     </div>
   )
 }

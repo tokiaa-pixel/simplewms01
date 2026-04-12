@@ -7,7 +7,7 @@ interface ModalProps {
   title: string
   onClose: () => void
   children: React.ReactNode
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   /** true のとき × ボタン・背景クリック・Escキーを無効化する */
   locked?: boolean
 }
@@ -16,6 +16,7 @@ const SIZE_CLASS = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
+  xl: 'max-w-5xl',
 }
 
 export default function Modal({

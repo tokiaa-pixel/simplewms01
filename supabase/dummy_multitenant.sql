@@ -103,28 +103,28 @@ RESTART IDENTITY CASCADE;
 
 -- ── 1. tenants ────────────────────────────────────────────────
 
-INSERT INTO tenants (id, tenant_code, tenant_name, status)
+INSERT INTO tenants (id, tenant_code, tenant_name, tenant_name_ja, tenant_name_en, status)
 VALUES
-  ('11111111-0001-0000-0000-000000000000', 'T-001', '田中食品株式会社',  'active'),
-  ('11111111-0002-0000-0000-000000000000', 'T-002', '鈴木商事株式会社',  'active');
+  ('11111111-0001-0000-0000-000000000000', 'T-001', '田中食品株式会社', '田中食品株式会社', 'Tanaka Foods Co., Ltd', 'active'),
+  ('11111111-0002-0000-0000-000000000000', 'T-002', '鈴木商事株式会社', '鈴木商事株式会社', 'Suzuki Trading Co., Ltd', 'active');
 
 
 -- ── 2. warehouses ─────────────────────────────────────────────
 
-INSERT INTO warehouses (id, tenant_id, warehouse_code, warehouse_name, address, status)
+INSERT INTO warehouses (id, tenant_id, warehouse_code, warehouse_name, warehouse_name_ja, warehouse_name_en, status)
 VALUES
   ('22222222-1001-0000-0000-000000000000',
    '11111111-0001-0000-0000-000000000000',
-   'WH-T1-01', '東京第一倉庫',   '東京都江東区辰巳1-1-1',           'active'),
+   'WH-T1-01', '東京第一倉庫', '東京第一倉庫', 'Tokyo Warehouse 1', 'active'),
   ('22222222-1002-0000-0000-000000000000',
    '11111111-0001-0000-0000-000000000000',
-   'WH-T1-02', '大阪第一倉庫',   '大阪府大阪市此花区北港1-2-3',     'active'),
+   'WH-T1-02', '大阪第一倉庫', '大阪第一倉庫', 'Osaka Warehouse 1', 'active'),
   ('22222222-2001-0000-0000-000000000000',
    '11111111-0002-0000-0000-000000000000',
-   'WH-T2-01', '横浜第一倉庫',   '神奈川県横浜市鶴見区末広町1-5-2', 'active'),
+   'WH-T2-01', '横浜第一倉庫', '横浜第一倉庫', 'Yokohama Warehouse 1', 'active'),
   ('22222222-2002-0000-0000-000000000000',
    '11111111-0002-0000-0000-000000000000',
-   'WH-T2-02', '名古屋第一倉庫', '愛知県名古屋市港区入船2-3-4',     'active');
+   'WH-T2-02', '名古屋第一倉庫', '名古屋第一倉庫', 'Nagoya Warehouse 1', 'active');
 
 
 -- ── 3. suppliers（同テナント内で一意）────────────────────────
