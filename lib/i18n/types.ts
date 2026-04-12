@@ -178,7 +178,9 @@ export interface Translations {
     colProductCode: string
     colProductName: string
     colCategory: string
-    colQty: string
+    colOnHandQty: string
+    colAllocatedQty: string
+    colAvailableQty: string
     colUnit: string
     colLocation: string
     colStatus: string
@@ -189,7 +191,9 @@ export interface Translations {
     detailName: string
     detailCategory: string
     detailLocation: string
-    detailQty: string
+    detailOnHandQty: string
+    detailAllocatedQty: string
+    detailAvailableQty: string
     detailUnit: string
     detailMin: string
     detailMax: string

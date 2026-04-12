@@ -29,7 +29,12 @@ export interface InventoryItem {
   productCode: string
   productName: string
   category: string
-  quantity: number
+  /** 実在庫数（倉庫に物理的に存在する数量） */
+  onHandQty: number
+  /** 引当済み数量（出庫指示で押さえている数量） */
+  allocatedQty: number
+  /** 引当可能数 = onHandQty - allocatedQty（参照専用・DB には持たない） */
+  availableQty: number
   unit: string
   locationCode: string
   status: InventoryStatus

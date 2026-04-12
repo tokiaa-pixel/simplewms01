@@ -5,7 +5,8 @@ import type { InventoryItem, InventoryStatus } from '@/lib/types'
 
 type InventoryRow = {
   id:            string
-  qty:           number
+  on_hand_qty:   number
+  allocated_qty: number
   status:        string
   received_date: string | null
   updated_at:    string
@@ -21,15 +22,13 @@ type InventoryRow = {
 }
 
 // ─── DB status → InventoryStatus（未知値はフォールバック） ────
-// DB には 'available' | 'damaged' | 'hold' のみ入る想定。
-// 移行前の旧値や予期しない値が来てもクラッシュしない。
 
 function toInventoryStatus(raw: string): InventoryStatus {
   if (raw === 'available' || raw === 'damaged' || raw === 'hold') return raw
-  return 'available'   // 未知値は available として扱う
+  return 'available'
 }
 
-// ─── Supabase Row → アプリ内 InventoryItem ────────────────────
+// ─── 日付フォーマット ──────────────────────────────────────────
 
 function formatDate(raw: string | null): string {
   if (!raw) return ''
@@ -38,22 +37,28 @@ function formatDate(raw: string | null): string {
   })
 }
 
+// ─── Supabase Row → アプリ内 InventoryItem ────────────────────
+
 function toInventoryItem(row: InventoryRow): InventoryItem {
   const p = row.products
   const l = row.locations
+  const onHandQty   = row.on_hand_qty   ?? 0
+  const allocatedQty = row.allocated_qty ?? 0
   return {
-    id:           row.id,
-    productCode:  p?.product_code    ?? '',
-    productName:  p?.product_name_ja ?? '',
-    category:     p?.category        ?? '',
-    quantity:     row.qty,
-    unit:         p?.unit            ?? '',
-    locationCode: l?.location_code   ?? '',
-    status:       toInventoryStatus(row.status),
-    minStock:     0,
-    maxStock:     0,
-    receivedDate: row.received_date ? formatDate(row.received_date) : undefined,
-    updatedAt:    formatDate(row.updated_at),
+    id:            row.id,
+    productCode:   p?.product_code    ?? '',
+    productName:   p?.product_name_ja ?? '',
+    category:      p?.category        ?? '',
+    onHandQty,
+    allocatedQty,
+    availableQty:  Math.max(0, onHandQty - allocatedQty),
+    unit:          p?.unit            ?? '',
+    locationCode:  l?.location_code   ?? '',
+    status:        toInventoryStatus(row.status),
+    minStock:      0,
+    maxStock:      0,
+    receivedDate:  row.received_date ? formatDate(row.received_date) : undefined,
+    updatedAt:     formatDate(row.updated_at),
   }
 }
 
@@ -66,7 +71,7 @@ export async function fetchInventory(): Promise<{
   const { data, error } = await supabase
     .from('inventory')
     .select(`
-      id, qty, status, received_date, updated_at,
+      id, on_hand_qty, allocated_qty, status, received_date, updated_at,
       products  ( product_code, product_name_ja, category, unit ),
       locations ( location_code )
     `)

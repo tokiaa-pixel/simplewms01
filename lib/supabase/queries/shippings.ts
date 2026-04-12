@@ -20,7 +20,8 @@ type ProductRow  = {
 }
 type InventoryRaw = {
   id:            string
-  qty:           number
+  on_hand_qty:   number
+  allocated_qty: number
   status:        string
   received_date: string | null
   locations: { id: string; location_code: string; location_name: string } | null
@@ -46,7 +47,9 @@ export type InventoryLine = {
   locationCode: string
   locationName: string
   status:       InventoryStatus
-  availableQty: number         // その行で引き当て可能な在庫数（元の qty）
+  onHandQty:    number         // 実在庫（表示用）
+  allocatedQty: number         // 引当済み（表示用）
+  availableQty: number         // 引当可能 = onHandQty - allocatedQty
   receivedDate: string | null  // FIFO ソートキー（YYYY-MM-DD）
 }
 
@@ -57,7 +60,7 @@ export type AllocationItem = {
   locationCode: string
   locationName: string
   status:       InventoryStatus
-  availableQty: number         // その行の総在庫（表示用）
+  availableQty: number         // その行の引当可能数（表示用）
   allocatedQty: number         // 今回引き当てる数
   receivedDate: string | null
 }
@@ -120,7 +123,7 @@ export async function fetchShipProductOptions(): Promise<{
 }
 
 // =============================================================
-// 商品の引当可能在庫一覧取得（status = available のみ）
+// 商品の引当可能在庫一覧取得（status = available, available_qty > 0）
 // =============================================================
 
 export async function fetchInventoryForProduct(productId: string): Promise<{
@@ -130,19 +133,27 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
   const { data, error } = await supabase
     .from('inventory')
     .select(`
-      id, qty, status, received_date,
+      id, on_hand_qty, allocated_qty, status, received_date,
       locations ( id, location_code, location_name )
     `)
     .eq('product_id', productId)
     .eq('status', 'available')
-    .gt('qty', 0)
+    .gt('on_hand_qty', 0)
 
   if (error) return { data: [], error: error.message }
 
   const rows = data as unknown as InventoryRaw[]
 
+  // available_qty = on_hand_qty - allocated_qty が正のものだけ残す
+  const available = rows
+    .map((r) => ({
+      ...r,
+      _availableQty: Math.max(0, (r.on_hand_qty ?? 0) - (r.allocated_qty ?? 0)),
+    }))
+    .filter((r) => r._availableQty > 0)
+
   // FIFO 順（received_date ASC nulls last）
-  rows.sort((a, b) => {
+  available.sort((a, b) => {
     if (!a.received_date && !b.received_date) return 0
     if (!a.received_date) return 1
     if (!b.received_date) return -1
@@ -150,13 +161,15 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
   })
 
   return {
-    data: rows.map((r) => ({
+    data: available.map((r) => ({
       inventoryId:  r.id,
       locationId:   r.locations?.id          ?? '',
       locationCode: r.locations?.location_code ?? '',
       locationName: r.locations?.location_name ?? '',
       status:       toInventoryStatus(r.status),
-      availableQty: r.qty,
+      onHandQty:    r.on_hand_qty   ?? 0,
+      allocatedQty: r.allocated_qty ?? 0,
+      availableQty: r._availableQty,
       receivedDate: r.received_date,
     })),
     error: null,
@@ -170,7 +183,7 @@ export async function fetchInventoryForProduct(productId: string): Promise<{
 /**
  * 在庫行リスト（received_date ASC でソート済み前提）から
  * requestedQty を満たす引当を計算して返す。
- * 在庫不足の場合でも可能な限り引当した結果を返す。
+ * available_qty を超えた引当は行わない。在庫不足の場合は可能な限り引当。
  */
 export function computeFifoAllocation(
   lines: InventoryLine[],
@@ -182,6 +195,7 @@ export function computeFifoAllocation(
   for (const line of lines) {
     if (remaining <= 0) break
     const take = Math.min(line.availableQty, remaining)
+    if (take <= 0) continue
     result.push({
       inventoryId:  line.inventoryId,
       locationId:   line.locationId,
@@ -222,7 +236,7 @@ export async function generateShippingNo(): Promise<string> {
 
 // =============================================================
 // 出庫指示登録（header + lines + allocations）
-// 在庫数は変動しない（確定時に別途減算）
+// 引当確定と同時に inventory.allocated_qty を加算する
 // =============================================================
 
 export async function createShippingOrder(params: {
@@ -278,8 +292,8 @@ export async function createShippingOrder(params: {
     type LineResult = { id: string; line_no: number }
     const lineResults = lineData as unknown as LineResult[]
 
-    // ── Step 3: shipping_allocations を一括 INSERT ─────────────
-    const allocationRecords = lines.flatMap((l) => {
+    // ── Step 3: shipping_allocations を一括 INSERT ────���────────
+    const allAllocs = lines.flatMap((l) => {
       const lineResult = lineResults.find((r) => r.line_no === l.lineNo)
       if (!lineResult) return []
       return l.allocations.map((a) => ({
@@ -289,12 +303,126 @@ export async function createShippingOrder(params: {
       }))
     })
 
-    if (allocationRecords.length > 0) {
+    if (allAllocs.length > 0) {
       const { error: allocErr } = await dml('shipping_allocations')
-        .insert(allocationRecords)
-
+        .insert(allAllocs)
       if (allocErr) throw new Error(`引当登録エラー: ${allocErr.message}`)
     }
+
+    // ── Step 4: inventory.allocated_qty を加算 ────────────────
+    // 同一 inventory_id への引当を集約してから更新する
+    const allocByInventory = new Map<string, number>()
+    for (const l of lines) {
+      for (const a of l.allocations) {
+        allocByInventory.set(
+          a.inventoryId,
+          (allocByInventory.get(a.inventoryId) ?? 0) + a.allocatedQty,
+        )
+      }
+    }
+
+    for (const [inventoryId, addQty] of allocByInventory) {
+      // 現在の on_hand_qty / allocated_qty を取得して available_qty を確認
+      const { data: invRaw, error: invSelectErr } = await supabase
+        .from('inventory')
+        .select('on_hand_qty, allocated_qty')
+        .eq('id', inventoryId)
+        .single()
+
+      if (invSelectErr) throw new Error(`在庫取得エラー: ${invSelectErr.message}`)
+
+      type InvRow = { on_hand_qty: number; allocated_qty: number }
+      const inv = invRaw as unknown as InvRow
+      const available = Math.max(0, (inv.on_hand_qty ?? 0) - (inv.allocated_qty ?? 0))
+
+      if (addQty > available) {
+        throw new Error(
+          `引当可能数を超えています（在庫ID: ${inventoryId}, 引当可能: ${available}, 要求: ${addQty}）`
+        )
+      }
+
+      const { error: invUpdateErr } = await dml('inventory')
+        .update({ allocated_qty: (inv.allocated_qty ?? 0) + addQty })
+        .eq('id', inventoryId)
+
+      if (invUpdateErr) throw new Error(`在庫引当更新エラー: ${invUpdateErr.message}`)
+    }
+
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
+  }
+}
+
+// =============================================================
+// 出庫確定：on_hand_qty と allocated_qty を同時に減算
+// =============================================================
+
+/**
+ * 出庫確定処理。shipping_allocations に従って
+ * inventory.on_hand_qty と inventory.allocated_qty を減算する。
+ * shipping_lines.shipped_qty と shipping_headers.status も更新する。
+ */
+export async function confirmShipping(params: {
+  headerId:   string
+  lineId:     string
+  shippedQty: number
+  allocations: Array<{
+    inventoryId:  string
+    allocatedQty: number  // 実際に出庫する数量（引当済み数量と一致する想定）
+  }>
+}): Promise<{ error: string | null }> {
+  const { headerId, lineId, shippedQty, allocations } = params
+
+  try {
+    // ── Step 1: 各 inventory の on_hand_qty / allocated_qty を減算 ─
+    for (const a of allocations) {
+      const { data: invRaw, error: invSelectErr } = await supabase
+        .from('inventory')
+        .select('on_hand_qty, allocated_qty')
+        .eq('id', a.inventoryId)
+        .single()
+
+      if (invSelectErr) throw new Error(`在庫取得エラー: ${invSelectErr.message}`)
+
+      type InvRow = { on_hand_qty: number; allocated_qty: number }
+      const inv = invRaw as unknown as InvRow
+
+      const newOnHand    = Math.max(0, (inv.on_hand_qty   ?? 0) - a.allocatedQty)
+      const newAllocated = Math.max(0, (inv.allocated_qty ?? 0) - a.allocatedQty)
+
+      const { error: invUpdateErr } = await dml('inventory')
+        .update({ on_hand_qty: newOnHand, allocated_qty: newAllocated })
+        .eq('id', a.inventoryId)
+
+      if (invUpdateErr) throw new Error(`在庫減算エラー: ${invUpdateErr.message}`)
+    }
+
+    // ── Step 2: shipping_lines を更新 ─────────────────────────
+    const { error: lineErr } = await dml('shipping_lines')
+      .update({ shipped_qty: shippedQty, status: 'completed' })
+      .eq('id', lineId)
+
+    if (lineErr) throw new Error(`明細更新エラー: ${lineErr.message}`)
+
+    // ── Step 3: 全明細が完了なら shipping_headers を shipped に ─
+    const { data: siblingsRaw, error: siblingsErr } = await supabase
+      .from('shipping_lines')
+      .select('status')
+      .eq('header_id', headerId)
+
+    if (siblingsErr) throw new Error(`明細取得エラー: ${siblingsErr.message}`)
+
+    type StatusRow = { status: string }
+    const siblings  = siblingsRaw as unknown as StatusRow[]
+    const allDone   = siblings.every((s) => s.status === 'completed' || s.status === 'cancelled')
+    const newStatus = allDone ? 'shipped' : 'picking'
+
+    const { error: headerErr } = await dml('shipping_headers')
+      .update({ status: newStatus })
+      .eq('id', headerId)
+
+    if (headerErr) throw new Error(`ヘッダー更新エラー: ${headerErr.message}`)
 
     return { error: null }
   } catch (e) {

@@ -35,7 +35,7 @@ type LineRaw = {
 }
 
 type LocationRow   = { id: string; location_code: string }
-type InventoryRow  = { id: string; qty: number }
+type InventoryRow  = { id: string; on_hand_qty: number; allocated_qty: number }
 type SiblingRow    = { status: string; received_qty: number }
 
 // =============================================================
@@ -190,7 +190,7 @@ export async function confirmArrivalReceiving(params: {
     // INSERT に流れて duplicate key エラーになるため含めない。
     const { data: existingRaw, error: selectErr } = await supabase
       .from('inventory')
-      .select('id, qty')
+      .select('id, on_hand_qty, allocated_qty')
       .eq('product_id',  productId)
       .eq('location_id', locationId)
       .eq('status',      inventoryStatus)
@@ -202,10 +202,10 @@ export async function confirmArrivalReceiving(params: {
 
     // ── Step 2: inventory を upsert（加算 or 新規） ───────────
     if (existing) {
-      // 同一 (product_id, location_id, status) のレコードが存在 → qty を加算
+      // 同一 (product_id, location_id, status) のレコードが存在 → on_hand_qty を加算
       // received_date は最初に入庫した日付を保持し続ける（上書きしない）
       const { error: updateErr } = await dml('inventory')
-        .update({ qty: Math.max(0, existing.qty + addQty) })
+        .update({ on_hand_qty: Math.max(0, existing.on_hand_qty + addQty) })
         .eq('id', existing.id)
 
       if (updateErr) throw new Error(`在庫更新エラー: ${updateErr.message}`)
@@ -215,7 +215,8 @@ export async function confirmArrivalReceiving(params: {
         .insert({
           product_id:    productId,
           location_id:   locationId,
-          qty:           addQty,
+          on_hand_qty:   addQty,
+          allocated_qty: 0,
           status:        inventoryStatus,
           received_date: receivedDate || null,
         })

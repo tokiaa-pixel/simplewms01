@@ -33,29 +33,28 @@ function StatusBadge({ status }: { status: InventoryStatus }) {
   )
 }
 
-// ─── 在庫レベルバー ────────────────────────────────────────────
+// ─── 数量セル（3段表示）────────────────────────────────────────
 
-function StockLevelBar({ item }: { item: InventoryItem }) {
-  const pct = item.maxStock > 0
-    ? Math.min((item.quantity / item.maxStock) * 100, 100)
-    : 0
-  const barColor =
-    item.status === 'damaged' ? 'bg-red-400' :
-    item.status === 'hold'    ? 'bg-amber-400' :
-    'bg-green-400'
-
+function QtyCell({ item }: { item: InventoryItem }) {
+  const available = item.availableQty
+  const allocated = item.allocatedQty
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-[10px] text-slate-400">
-        <span>{item.minStock}</span>
-        <span>{item.maxStock}</span>
+    <div className="text-right tabular-nums space-y-0.5">
+      {/* 引当可能数：最も重要なので大きく */}
+      <div className={`font-semibold ${
+        item.status === 'damaged' ? 'text-red-600' :
+        item.status === 'hold'    ? 'text-amber-600' :
+        available === 0           ? 'text-slate-400' :
+        'text-slate-800'
+      }`}>
+        {available.toLocaleString()}
       </div>
-      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${barColor}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      {/* 引当済みがある場合のみ補足表示 */}
+      {allocated > 0 && (
+        <div className="text-[10px] text-amber-600">
+          引当済 {allocated.toLocaleString()}
+        </div>
+      )}
     </div>
   )
 }
@@ -76,7 +75,7 @@ function DetailSection({ label, children }: { label: string; children: React.Rea
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start py-2 border-b border-slate-50 last:border-0">
-      <dt className="w-32 flex-shrink-0 text-xs text-slate-500">{label}</dt>
+      <dt className="w-36 flex-shrink-0 text-xs text-slate-500">{label}</dt>
       <dd className="flex-1 text-xs text-slate-800 font-medium">{value}</dd>
     </div>
   )
@@ -109,22 +108,44 @@ function InventoryDetailModal({
         </DetailSection>
 
         {/* 在庫情報 */}
-        <DetailSection label={t('detailQty')}>
+        <DetailSection label={t('detailOnHandQty')}>
           <dl>
+            {/* 総在庫数 */}
             <DetailRow
-              label={t('detailQty')}
+              label={t('detailOnHandQty')}
               value={
-                <span className={`text-base font-bold ${
-                  item.status === 'damaged' ? 'text-red-600' :
-                  item.status === 'hold'    ? 'text-amber-600' :
-                  'text-slate-800'
-                }`}>
-                  {item.quantity.toLocaleString()}
+                <span className="text-base font-bold text-slate-800 tabular-nums">
+                  {item.onHandQty.toLocaleString()}
                   <span className="text-xs font-normal text-slate-500 ml-1">{item.unit}</span>
                 </span>
               }
             />
-            <DetailRow label={t('colStatus')}     value={<StatusBadge status={item.status} />} />
+            {/* 引当済み数量 */}
+            <DetailRow
+              label={t('detailAllocatedQty')}
+              value={
+                <span className={`text-base font-bold tabular-nums ${item.allocatedQty > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                  {item.allocatedQty.toLocaleString()}
+                  <span className="text-xs font-normal text-slate-500 ml-1">{item.unit}</span>
+                </span>
+              }
+            />
+            {/* 引当可能数 */}
+            <DetailRow
+              label={t('detailAvailableQty')}
+              value={
+                <span className={`text-base font-bold tabular-nums ${
+                  item.status === 'damaged' ? 'text-red-600' :
+                  item.status === 'hold'    ? 'text-amber-600' :
+                  item.availableQty === 0   ? 'text-slate-400' :
+                  'text-green-700'
+                }`}>
+                  {item.availableQty.toLocaleString()}
+                  <span className="text-xs font-normal text-slate-500 ml-1">{item.unit}</span>
+                </span>
+              }
+            />
+            <DetailRow label={t('colStatus')}      value={<StatusBadge status={item.status} />} />
             <DetailRow label={t('detailLocation')} value={<span className="font-mono">{item.locationCode}</span>} />
             {item.receivedDate && (
               <DetailRow label={t('detailReceivedDate')} value={
@@ -135,21 +156,6 @@ function InventoryDetailModal({
               <DetailRow label={t('detailLot')} value={<span className="font-mono">{item.lotNumber}</span>} />
             )}
           </dl>
-        </DetailSection>
-
-        {/* 在庫レベル */}
-        <DetailSection label={`${t('detailMin')} / ${t('detailMax')}`}>
-          <div className="bg-slate-50 rounded-lg p-4">
-            <div className="flex justify-between items-end mb-3">
-              <span className="text-xs text-slate-500">
-                {t('detailQty')}: <strong className="text-slate-700">{item.quantity} {item.unit}</strong>
-              </span>
-              <span className="text-xs text-slate-400">
-                {item.maxStock > 0 ? `${Math.round((item.quantity / item.maxStock) * 100)}%` : '–'}
-              </span>
-            </div>
-            <StockLevelBar item={item} />
-          </div>
         </DetailSection>
 
         {/* 備考・更新情報 */}
@@ -215,7 +221,6 @@ export default function InventoryPage() {
   const [statusFilter, setStatusFilter] = useState<InventoryStatus | 'all'>('all')
   const [selected, setSelected]         = useState<InventoryItem | null>(null)
 
-  // Supabase からデータ取得
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -360,13 +365,20 @@ export default function InventoryPage() {
                   <span className="font-mono bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
                     {item.locationCode}
                   </span>
-                  <span className={`font-semibold tabular-nums ${
-                    item.status === 'damaged' ? 'text-red-600' :
-                    item.status === 'hold'    ? 'text-amber-600' : 'text-slate-800'
-                  }`}>
-                    {item.quantity.toLocaleString()}
-                    <span className="font-normal text-slate-400 ml-0.5">{item.unit}</span>
-                  </span>
+                  <div className="text-right">
+                    <span className={`font-semibold tabular-nums ${
+                      item.status === 'damaged' ? 'text-red-600' :
+                      item.status === 'hold'    ? 'text-amber-600' :
+                      item.availableQty === 0   ? 'text-slate-400' :
+                      'text-slate-800'
+                    }`}>
+                      {item.availableQty.toLocaleString()}
+                      <span className="font-normal text-slate-400 ml-0.5">{item.unit}</span>
+                    </span>
+                    {item.allocatedQty > 0 && (
+                      <p className="text-[10px] text-amber-600">引当済 {item.allocatedQty}</p>
+                    )}
+                  </div>
                 </div>
               </div>
             ))
@@ -381,7 +393,10 @@ export default function InventoryPage() {
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colProductCode')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">{t('colProductName')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colCategory')}</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colQty')}</th>
+                {/* 数量 3カラム */}
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colOnHandQty')}</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-amber-600 whitespace-nowrap">{t('colAllocatedQty')}</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-green-700 whitespace-nowrap">{t('colAvailableQty')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colUnit')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colLocation')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colStatus')}</th>
@@ -392,7 +407,7 @@ export default function InventoryPage() {
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-16 text-center">
+                  <td colSpan={11} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <Package size={28} />
                       <p className="text-sm">{t('empty')}</p>
@@ -421,12 +436,22 @@ export default function InventoryPage() {
                     <td className="px-4 py-3">
                       <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{item.category}</span>
                     </td>
+                    {/* 総在庫 */}
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-600">
+                      {item.onHandQty.toLocaleString()}
+                    </td>
+                    {/* 引当済み */}
+                    <td className={`px-4 py-3 text-right tabular-nums ${item.allocatedQty > 0 ? 'text-amber-600 font-medium' : 'text-slate-300'}`}>
+                      {item.allocatedQty > 0 ? item.allocatedQty.toLocaleString() : '—'}
+                    </td>
+                    {/* 引当可能 */}
                     <td className={`px-4 py-3 text-right tabular-nums font-semibold ${
                       item.status === 'damaged' ? 'text-red-600' :
                       item.status === 'hold'    ? 'text-amber-600' :
-                      'text-slate-800'
+                      item.availableQty === 0   ? 'text-slate-400' :
+                      'text-green-700'
                     }`}>
-                      {item.quantity.toLocaleString()}
+                      {item.availableQty.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">{item.unit}</td>
                     <td className="px-4 py-3">

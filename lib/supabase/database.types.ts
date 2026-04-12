@@ -75,7 +75,8 @@ export interface Database {
       inventory: {
         Row: {
           id:            string
-          qty:           number
+          on_hand_qty:   number          // 実在庫数
+          allocated_qty: number          // 引当済み数量
           product_id:    string
           location_id:   string
           status:        string
@@ -85,7 +86,8 @@ export interface Database {
           updated_at:    string
         }
         Insert: {
-          qty:             number
+          on_hand_qty:     number
+          allocated_qty?:  number
           product_id:      string
           location_id:     string
           status:          string
@@ -93,7 +95,8 @@ export interface Database {
           updated_by?:     string | null
         }
         Update: {
-          qty?:            number
+          on_hand_qty?:    number
+          allocated_qty?:  number
           product_id?:     string
           location_id?:    string
           status?:         string
