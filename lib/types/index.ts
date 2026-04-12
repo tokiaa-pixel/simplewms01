@@ -72,7 +72,8 @@ export interface InventoryItem {
   maxStock: number
   updatedAt: string
   receivedDate?: string   // 入庫日 (YYYY/MM/DD)。FIFO 引当の基準日
-  lotNumber?: string
+  lotNumber?: string      // ロット番号（DB: lot_no）
+  expiryDate?: string     // 有効期限 (YYYY/MM/DD)。FEFO 引当のソートキー（DB: expiry_date）
   supplierName?: string
   note?: string
 }

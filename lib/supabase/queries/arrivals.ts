@@ -32,6 +32,8 @@ type LineRaw = {
   received_qty:        number
   planned_location_id: string | null
   status:              string
+  lot_no:              string | null   // migration_v3 で追加
+  expiry_date:         string | null   // migration_v3 で追加（YYYY-MM-DD）
   products: { product_code: string; product_name_ja: string; unit: string } | null
 }
 
@@ -54,6 +56,8 @@ export type ArrivalLineItem = {
   locationId:   string
   locationCode: string
   status:       ArrivalStatus
+  lotNo?:       string   // ロット番号（DB: lot_no。migration_v3 で追加）
+  expiryDate?:  string   // 有効期限 YYYY-MM-DD（DB: expiry_date。FEFO のキー）
 }
 
 /** arrival_no 単位のグループ（arrival_headers 1行に対応） */
@@ -128,7 +132,7 @@ export async function fetchArrivalGroups(scope: QueryScope): Promise<{
       suppliers ( supplier_name_ja ),
       arrival_lines (
         id, line_no, product_id, planned_qty, received_qty,
-        planned_location_id, status,
+        planned_location_id, status, lot_no, expiry_date,
         products ( product_code, product_name_ja, unit )
       )
     `)
@@ -176,6 +180,8 @@ export async function fetchArrivalGroups(scope: QueryScope): Promise<{
         locationId,
         locationCode: locationId ? (locationMap[locationId] ?? '') : '',
         status:       toArrivalStatus(l.status),
+        lotNo:        l.lot_no      ?? undefined,
+        expiryDate:   l.expiry_date ?? undefined,
       }
     })
 

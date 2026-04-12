@@ -13,95 +13,120 @@
 --
 -- 【実行方法】
 --   Supabase Dashboard → SQL Editor に貼り付けてそのまま実行してください。
+--   既存ポリシーがある場合はスキップされます（冪等）。
 -- =============================================================
 
 
 -- ─── マスタ系テーブル ──────────────────────────────────────────
 
-CREATE POLICY "anon read tenants"
-  ON tenants FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read tenants" ON tenants FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read warehouses"
-  ON warehouses FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read warehouses" ON warehouses FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read products"
-  ON products FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read products" ON products FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read suppliers"
-  ON suppliers FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read suppliers" ON suppliers FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read customers"
-  ON customers FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read customers" ON customers FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read locations"
-  ON locations FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read locations" ON locations FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- ─── 入庫系テーブル ────────────────────────────────────────────
 
-CREATE POLICY "anon read arrival_headers"
-  ON arrival_headers FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read arrival_headers" ON arrival_headers FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read arrival_lines"
-  ON arrival_lines FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read arrival_lines" ON arrival_lines FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- ─── 在庫テーブル ──────────────────────────────────────────────
 
-CREATE POLICY "anon read inventory"
-  ON inventory FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read inventory" ON inventory FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read inventory_transactions"
-  ON inventory_transactions FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read inventory_transactions" ON inventory_transactions FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- ─── 出庫系テーブル ────────────────────────────────────────────
 
-CREATE POLICY "anon read shipping_headers"
-  ON shipping_headers FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read shipping_headers" ON shipping_headers FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read shipping_lines"
-  ON shipping_lines FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read shipping_lines" ON shipping_lines FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon read shipping_allocations"
-  ON shipping_allocations FOR SELECT TO anon USING (true);
+DO $$ BEGIN
+  CREATE POLICY "anon read shipping_allocations" ON shipping_allocations FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- ─── 書き込み系ポリシー（INSERT / UPDATE） ────────────────────
 -- SELECT だけでなく書き込みも必要なテーブルに追加します。
 
-CREATE POLICY "anon write arrival_headers"
-  ON arrival_headers FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write arrival_headers" ON arrival_headers FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write arrival_lines"
-  ON arrival_lines FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write arrival_lines" ON arrival_lines FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write inventory"
-  ON inventory FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write inventory" ON inventory FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write inventory_transactions"
-  ON inventory_transactions FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write inventory_transactions" ON inventory_transactions FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write shipping_headers"
-  ON shipping_headers FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write shipping_headers" ON shipping_headers FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write shipping_lines"
-  ON shipping_lines FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write shipping_lines" ON shipping_lines FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write shipping_allocations"
-  ON shipping_allocations FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write shipping_allocations" ON shipping_allocations FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write products"
-  ON products FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write products" ON products FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write suppliers"
-  ON suppliers FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write suppliers" ON suppliers FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write customers"
-  ON customers FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write customers" ON customers FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE POLICY "anon write locations"
-  ON locations FOR ALL TO anon USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "anon write locations" ON locations FOR ALL TO anon USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 
 -- =============================================================

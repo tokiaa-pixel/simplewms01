@@ -22,6 +22,8 @@ type InventoryRow = {
   allocated_qty: number
   status:        string
   received_date: string | null
+  lot_no:        string | null  // migration_v3 で追加
+  expiry_date:   string | null  // migration_v3 で追加（FEFO のキー）
   updated_at:    string
   products: {
     product_code:    string
@@ -72,6 +74,8 @@ function toInventoryItem(row: InventoryRow): InventoryItem {
     minStock:      0,
     maxStock:      0,
     receivedDate:  row.received_date ? formatDate(row.received_date) : undefined,
+    lotNumber:     row.lot_no      ?? undefined,
+    expiryDate:    row.expiry_date ? formatDate(row.expiry_date) : undefined,
     updatedAt:     formatDate(row.updated_at),
   }
 }
@@ -85,7 +89,7 @@ export async function fetchInventory(scope: QueryScope): Promise<{
   const { data, error } = await supabase
     .from('inventory')
     .select(`
-      id, product_id, location_id, on_hand_qty, allocated_qty, status, received_date, updated_at,
+      id, product_id, location_id, on_hand_qty, allocated_qty, status, received_date, lot_no, expiry_date, updated_at,
       products  ( product_code, product_name_ja, category, unit ),
       locations ( location_code )
     `)
