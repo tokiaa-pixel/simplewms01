@@ -1,11 +1,18 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Plus, Package, Building2, Users, MapPin, Power } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Plus, Package, Building2, Users, MapPin, Power, Warehouse as WarehouseIcon } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
 import { useWms } from '@/store/WmsContext'
+import { useTenant } from '@/store/TenantContext'
 import { useTranslation } from '@/lib/i18n'
+import type { Warehouse } from '@/lib/types'
+import {
+  fetchAllWarehousesForTenant,
+  createWarehouse,
+  toggleWarehouseStatus,
+} from '@/lib/supabase/queries/tenants'
 
 // ─── 共通UI ──────────────────────────────────────────────────
 
@@ -25,7 +32,7 @@ function ActiveBadge({ isActive }: { isActive: boolean }) {
 
 // ─── タブ定義 ──────────────────────────────────────────────────
 
-type TabKey = 'products' | 'suppliers' | 'customers' | 'locations'
+type TabKey = 'products' | 'suppliers' | 'customers' | 'locations' | 'warehouses'
 
 const CATEGORIES = ['電子部品', '周辺機器', '事務用品', 'PCアクセサリ', 'ストレージ', 'その他'] as const
 const UNITS = ['個', '本', '箱', 'セット', 'パック', 'kg'] as const
@@ -705,6 +712,165 @@ function LocationTab() {
   )
 }
 
+// ─── 倉庫マスタ ───────────────────────────────────────────────
+
+function WarehouseForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation('master')
+  const { t: tc } = useTranslation('common')
+  const { currentTenant } = useTenant()
+  const [name, setName]       = useState('')
+  const [address, setAddress] = useState('')
+  const [errors, setErrors]   = useState<Record<string, string>>({})
+  const [saving, setSaving]   = useState(false)
+
+  const validate = () => {
+    const e: Record<string, string> = {}
+    if (!name.trim()) e.name = t('errWarehouseName')
+    setErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  const handleSubmit = async () => {
+    if (!validate() || !currentTenant) return
+    setSaving(true)
+    const { error } = await createWarehouse({
+      tenantId: currentTenant.id,
+      name:     name.trim(),
+      address:  address.trim() || undefined,
+    })
+    setSaving(false)
+    if (error) { setErrors({ name: error }); return }
+    onSaved()
+    onClose()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">
+          {t('warehouseName')} <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text" value={name} onChange={(e) => setName(e.target.value)}
+          placeholder={t('warehouseNamePlaceholder')}
+          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
+        />
+        {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">{t('address')}</label>
+        <input
+          type="text" value={address} onChange={(e) => setAddress(e.target.value)}
+          placeholder={t('addressPlaceholder')}
+          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
+        />
+      </div>
+
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2 border-t border-slate-100">
+        <button onClick={onClose} className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">{tc('cancel')}</button>
+        <button onClick={handleSubmit} disabled={saving}
+          className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium disabled:opacity-50">
+          {tc('register')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function WarehouseTab() {
+  const { t } = useTranslation('master')
+  const { t: tc } = useTranslation('common')
+  const { currentTenant, refreshWarehouses } = useTenant()
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [search, setSearch]         = useState('')
+  const [showModal, setShowModal]   = useState(false)
+
+  const load = useCallback(async () => {
+    if (!currentTenant) { setWarehouses([]); return }
+    const { data } = await fetchAllWarehousesForTenant(currentTenant.id)
+    setWarehouses(data)
+  }, [currentTenant])
+
+  useEffect(() => { load() }, [load])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return warehouses.filter((w) =>
+      !q ||
+      w.code.toLowerCase().includes(q) ||
+      w.name.toLowerCase().includes(q) ||
+      (w.address ?? '').toLowerCase().includes(q)
+    )
+  }, [warehouses, search])
+
+  const handleToggle = async (w: Warehouse) => {
+    await toggleWarehouseStatus(w.id, w.status)
+    await load()
+    await refreshWarehouses()
+  }
+
+  const handleSaved = async () => {
+    await load()
+    await refreshWarehouses()
+  }
+
+  return (
+    <>
+      <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 sm:gap-3">
+        <SearchInput value={search} onChange={setSearch} placeholder={t('searchWarehousesPlaceholder')} />
+        <span className="text-xs text-slate-500 ml-auto">
+          {tc('total')} <strong className="text-slate-700">{filtered.length}</strong> {tc('countUnit')}
+        </span>
+        <button onClick={() => setShowModal(true)}
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2.5 sm:py-1.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors whitespace-nowrap">
+          <Plus size={14} />{tc('newRecord')}
+        </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/80">
+              {[t('colWarehouseCode'), t('colWarehouseName'), t('colAddress'), t('colStatus'), ''].map((h, i) => (
+                <th key={i} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={99} className="py-14 text-center">
+                  <p className="text-sm text-slate-400">{t('emptyWarehouses')}</p>
+                </td>
+              </tr>
+            ) : filtered.map((w) => (
+              <tr key={w.id} className={`hover:bg-slate-50/60 transition-colors ${w.status !== 'active' ? 'opacity-50' : ''}`}>
+                <td className="px-4 py-3 font-mono text-xs text-blue-600 whitespace-nowrap">{w.code}</td>
+                <td className="px-4 py-3 text-slate-800 font-medium whitespace-nowrap">{w.name}</td>
+                <td className="px-4 py-3 text-xs text-slate-600 max-w-[240px] truncate">{w.address ?? '—'}</td>
+                <td className="px-4 py-3"><ActiveBadge isActive={w.status === 'active'} /></td>
+                <td className="px-4 py-3">
+                  <button onClick={() => handleToggle(w)} title={w.status === 'active' ? tc('disable') : tc('enable')}
+                    className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                    <Power size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showModal && (
+        <Modal title={t('modalWarehouseTitle')} onClose={() => setShowModal(false)} size="md">
+          <WarehouseForm onClose={() => setShowModal(false)} onSaved={handleSaved} />
+        </Modal>
+      )}
+    </>
+  )
+}
+
 // ─── メインページ ─────────────────────────────────────────────
 
 export default function MasterPage() {
@@ -713,17 +879,19 @@ export default function MasterPage() {
   const { state } = useWms()
 
   const TABS: { key: TabKey; label: string; icon: React.ElementType; color: string }[] = [
-    { key: 'products',  label: t('tabProducts'),  icon: Package,   color: 'text-blue-600' },
-    { key: 'suppliers', label: t('tabSuppliers'), icon: Building2, color: 'text-green-600' },
-    { key: 'customers', label: t('tabCustomers'), icon: Users,     color: 'text-purple-600' },
-    { key: 'locations', label: t('tabLocations'), icon: MapPin,    color: 'text-amber-600' },
+    { key: 'products',   label: t('tabProducts'),   icon: Package,        color: 'text-blue-600' },
+    { key: 'suppliers',  label: t('tabSuppliers'),  icon: Building2,      color: 'text-green-600' },
+    { key: 'customers',  label: t('tabCustomers'),  icon: Users,          color: 'text-purple-600' },
+    { key: 'locations',  label: t('tabLocations'),  icon: MapPin,         color: 'text-amber-600' },
+    { key: 'warehouses', label: t('tabWarehouses'), icon: WarehouseIcon,  color: 'text-cyan-600' },
   ]
 
   const TAB_COUNTS: Record<TabKey, number> = {
-    products:  state.masterProducts.length,
-    suppliers: state.suppliers.length,
-    customers: state.customers.length,
-    locations: state.locations.length,
+    products:   state.masterProducts.length,
+    suppliers:  state.suppliers.length,
+    customers:  state.customers.length,
+    locations:  state.locations.length,
+    warehouses: 0,
   }
 
   return (
@@ -763,10 +931,11 @@ export default function MasterPage() {
         </div>
 
         {/* タブコンテンツ */}
-        {activeTab === 'products'  && <ProductTab />}
-        {activeTab === 'suppliers' && <SupplierTab />}
-        {activeTab === 'customers' && <CustomerTab />}
-        {activeTab === 'locations' && <LocationTab />}
+        {activeTab === 'products'   && <ProductTab />}
+        {activeTab === 'suppliers'  && <SupplierTab />}
+        {activeTab === 'customers'  && <CustomerTab />}
+        {activeTab === 'locations'  && <LocationTab />}
+        {activeTab === 'warehouses' && <WarehouseTab />}
       </div>
     </div>
   )

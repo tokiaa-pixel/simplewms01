@@ -418,6 +418,15 @@ export const ja: Translations = {
     emptySuppliers:          '仕入先がありません',
     emptyCustomers:          '得意先がありません',
     emptyLocations:          '保管場所がありません',
+    tabWarehouses:               '倉庫マスタ',
+    warehouseName:               '倉庫名',
+    warehouseNamePlaceholder:    '例: 東京倉庫',
+    colWarehouseCode:            '倉庫コード',
+    colWarehouseName:            '倉庫名',
+    searchWarehousesPlaceholder: 'コード・倉庫名・住所で検索',
+    modalWarehouseTitle:         '倉庫マスタ登録',
+    errWarehouseName:            '倉庫名を入力してください',
+    emptyWarehouses:             '倉庫がありません',
   },
 
   status: {

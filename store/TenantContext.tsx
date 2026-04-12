@@ -37,6 +37,8 @@ interface TenantContextType {
   isLoading:          boolean
   setTenant:    (tenant:    Tenant)    => void
   setWarehouse: (warehouse: Warehouse) => void
+  /** 倉庫マスタ登録後にサイドバー選択肢を再取得する */
+  refreshWarehouses: () => Promise<void>
 }
 
 const TenantContext = createContext<TenantContextType | null>(null)
@@ -107,6 +109,18 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_WAREHOUSE, warehouse.id)
   }, [])
 
+  // ── 倉庫一覧再取得（マスタ登録後に呼ぶ） ─────────────────────
+  const refreshWarehouses = useCallback(async () => {
+    if (!currentTenant) return
+    const { data: warehouses } = await fetchWarehousesForTenant(currentTenant.id)
+    setAvailableWarehouses(warehouses)
+    // 現在選択中の倉庫が非アクティブになっていた場合は先頭へ切り替え
+    if (warehouses.length > 0 && !warehouses.find((w) => w.id === currentWarehouse?.id)) {
+      setCurrentWarehouse(warehouses[0])
+      localStorage.setItem(STORAGE_WAREHOUSE, warehouses[0].id)
+    }
+  }, [currentTenant, currentWarehouse])
+
   const scope: QueryScope | null =
     currentTenant && currentWarehouse
       ? { tenantId: currentTenant.id, warehouseId: currentWarehouse.id }
@@ -122,6 +136,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       isLoading,
       setTenant,
       setWarehouse,
+      refreshWarehouses,
     }}>
       {children}
     </TenantContext.Provider>

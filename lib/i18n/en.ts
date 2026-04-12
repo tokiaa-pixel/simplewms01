@@ -418,6 +418,15 @@ export const en: Translations = {
     emptySuppliers:          'No suppliers found',
     emptyCustomers:          'No customers found',
     emptyLocations:          'No locations found',
+    tabWarehouses:               'Warehouses',
+    warehouseName:               'Warehouse Name',
+    warehouseNamePlaceholder:    'e.g. Tokyo Warehouse',
+    colWarehouseCode:            'Warehouse Code',
+    colWarehouseName:            'Warehouse Name',
+    searchWarehousesPlaceholder: 'Search by code, name, or address',
+    modalWarehouseTitle:         'New Warehouse',
+    errWarehouseName:            'Please enter a warehouse name',
+    emptyWarehouses:             'No warehouses found',
   },
 
   status: {

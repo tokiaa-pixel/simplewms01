@@ -414,6 +414,15 @@ export interface Translations {
     emptySuppliers: string
     emptyCustomers: string
     emptyLocations: string
+    tabWarehouses: string
+    warehouseName: string
+    warehouseNamePlaceholder: string
+    colWarehouseCode: string
+    colWarehouseName: string
+    searchWarehousesPlaceholder: string
+    modalWarehouseTitle: string
+    errWarehouseName: string
+    emptyWarehouses: string
   }
   status: {
     arrival_pending: string
