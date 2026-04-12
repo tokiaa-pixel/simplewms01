@@ -3,7 +3,14 @@ import type { InventoryItem, InventoryStatus } from '@/lib/types'
 
 // INSERT / UPDATE は typed client が never を返すため any キャストで回避
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dml = (table: string) => (supabase as any).from(table)
+const rpc = (fn: string, args: Record<string, unknown>) =>
+  (supabase as any).rpc(fn, args) as Promise<{ data: { error: string | null } | null; error: unknown }>
+
+/** 現在のログインユーザー ID を取得（未ログインなら null） */
+async function getCurrentUserId(): Promise<string | null> {
+  const { data } = await supabase.auth.getUser()
+  return data.user?.id ?? null
+}
 
 // ─── Supabase SELECT の結合結果型 ─────────────────────────────
 
@@ -25,17 +32,6 @@ type InventoryRow = {
   locations: {
     location_code: string
   } | null
-}
-
-/** 在庫操作（move/adjust/status）で DB から取得する最小情報 */
-type InventoryOpRow = {
-  id:            string
-  product_id:    string
-  location_id:   string
-  on_hand_qty:   number
-  allocated_qty: number
-  status:        string
-  received_date: string | null
 }
 
 // ─── DB status → InventoryStatus（未知値はフォールバック） ────
@@ -145,77 +141,24 @@ export async function moveInventory(params: {
   inventoryId:           string
   destinationLocationId: string
   moveQty:               number
+  reason?:               string
 }): Promise<{ error: string | null }> {
-  const { inventoryId, destinationLocationId, moveQty } = params
+  const { inventoryId, destinationLocationId, moveQty, reason } = params
 
   if (moveQty <= 0) return { error: '移動数量は1以上を指定してください' }
 
-  try {
-    // ── Step 1: 移動元を取得 ─────────────────────────────────────
-    const { data: srcRaw, error: srcErr } = await supabase
-      .from('inventory')
-      .select('id, product_id, location_id, on_hand_qty, allocated_qty, status, received_date')
-      .eq('id', inventoryId)
-      .single()
+  const executedBy = await getCurrentUserId()
 
-    if (srcErr) throw new Error(`在庫取得エラー: ${srcErr.message}`)
-    const src = srcRaw as unknown as InventoryOpRow
+  const { data, error } = await rpc('rpc_move_inventory', {
+    p_inventory_id:            inventoryId,
+    p_destination_location_id: destinationLocationId,
+    p_move_qty:                moveQty,
+    p_reason:                  reason ?? null,
+    p_executed_by:             executedBy,
+  })
 
-    if (src.location_id === destinationLocationId) {
-      return { error: '移動元と移動先のロケーションが同じです' }
-    }
-
-    const availableQty = Math.max(0, (src.on_hand_qty ?? 0) - (src.allocated_qty ?? 0))
-    if (moveQty > availableQty) {
-      return { error: `引当可能数（${availableQty}）を超える移動はできません` }
-    }
-
-    // ── Step 2: 移動元の on_hand_qty を減算 ─────────────────────
-    const { error: srcUpdateErr } = await dml('inventory')
-      .update({ on_hand_qty: src.on_hand_qty - moveQty })
-      .eq('id', inventoryId)
-
-    if (srcUpdateErr) throw new Error(`移動元更新エラー: ${srcUpdateErr.message}`)
-
-    // ── Step 3: 移動先を検索（同一 product×location×status×received_date）────
-    const baseQuery = supabase
-      .from('inventory')
-      .select('id, on_hand_qty')
-      .eq('product_id',  src.product_id)
-      .eq('location_id', destinationLocationId)
-      .eq('status',      src.status)
-
-    const destQuery = src.received_date === null
-      ? baseQuery.is('received_date', null)
-      : baseQuery.eq('received_date', src.received_date)
-
-    const { data: dstRaw } = await destQuery.maybeSingle()
-    type DstRow = { id: string; on_hand_qty: number }
-    const dst = dstRaw as unknown as DstRow | null
-
-    // ── Step 4: 移動先 upsert ────────────────────────────────────
-    if (dst) {
-      const { error: dstUpdateErr } = await dml('inventory')
-        .update({ on_hand_qty: (dst.on_hand_qty ?? 0) + moveQty })
-        .eq('id', dst.id)
-      if (dstUpdateErr) throw new Error(`移動先更新エラー: ${dstUpdateErr.message}`)
-    } else {
-      const { error: dstInsertErr } = await dml('inventory')
-        .insert({
-          product_id:    src.product_id,
-          location_id:   destinationLocationId,
-          on_hand_qty:   moveQty,
-          allocated_qty: 0,
-          status:        src.status,
-          received_date: src.received_date ?? null,
-        })
-      if (dstInsertErr) throw new Error(`移動先登録エラー: ${dstInsertErr.message}`)
-    }
-
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
-  }
+  if (error) return { error: String(error) }
+  return { error: data?.error ?? null }
 }
 
 // =============================================================
@@ -232,46 +175,26 @@ export async function adjustInventory(params: {
   inventoryId: string
   adjustType:  'increase' | 'decrease' | 'set'
   qty:         number
-  reason:      string   // TODO: inventory_transactions に記録予定
+  reason:      string
+  note?:       string
 }): Promise<{ error: string | null }> {
-  const { inventoryId, adjustType, qty } = params
+  const { inventoryId, adjustType, qty, reason, note } = params
 
   if (qty < 0) return { error: '数量は0以上を指定してください' }
 
-  try {
-    const { data: srcRaw, error: srcErr } = await supabase
-      .from('inventory')
-      .select('id, on_hand_qty, allocated_qty')
-      .eq('id', inventoryId)
-      .single()
+  const executedBy = await getCurrentUserId()
 
-    if (srcErr) throw new Error(`在庫取得エラー: ${srcErr.message}`)
-    type SrcRow = { id: string; on_hand_qty: number; allocated_qty: number }
-    const src = srcRaw as unknown as SrcRow
+  const { data, error } = await rpc('rpc_adjust_inventory', {
+    p_inventory_id: inventoryId,
+    p_adjust_type:  adjustType,
+    p_qty:          qty,
+    p_reason:       reason ?? null,
+    p_note:         note   ?? null,
+    p_executed_by:  executedBy,
+  })
 
-    const newQty = adjustType === 'increase' ? (src.on_hand_qty + qty)
-                 : adjustType === 'decrease' ? (src.on_hand_qty - qty)
-                 : qty  // 'set'
-
-    if (newQty < 0) {
-      return { error: `調整後の在庫数が負数になります（現在: ${src.on_hand_qty}、調整後: ${newQty}）` }
-    }
-    if (newQty < (src.allocated_qty ?? 0)) {
-      return {
-        error: `引当済み数量（${src.allocated_qty}）を下回ります。引当を解除してから調整してください。`,
-      }
-    }
-
-    const { error: updateErr } = await dml('inventory')
-      .update({ on_hand_qty: newQty })
-      .eq('id', inventoryId)
-
-    if (updateErr) throw new Error(`数量更新エラー: ${updateErr.message}`)
-
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
-  }
+  if (error) return { error: String(error) }
+  return { error: data?.error ?? null }
 }
 
 // =============================================================
@@ -285,73 +208,22 @@ export async function changeInventoryStatus(params: {
   inventoryId: string
   newStatus:   InventoryStatus
   changeQty:   number
+  reason?:     string
 }): Promise<{ error: string | null }> {
-  const { inventoryId, newStatus, changeQty } = params
+  const { inventoryId, newStatus, changeQty, reason } = params
 
   if (changeQty <= 0) return { error: '変更数量は1以上を指定してください' }
 
-  try {
-    // ── Step 1: 元在庫を取得 ─────────────────────────────────────
-    const { data: srcRaw, error: srcErr } = await supabase
-      .from('inventory')
-      .select('id, product_id, location_id, on_hand_qty, allocated_qty, status, received_date')
-      .eq('id', inventoryId)
-      .single()
+  const executedBy = await getCurrentUserId()
 
-    if (srcErr) throw new Error(`在庫取得エラー: ${srcErr.message}`)
-    const src = srcRaw as unknown as InventoryOpRow
+  const { data, error } = await rpc('rpc_change_inventory_status', {
+    p_inventory_id: inventoryId,
+    p_new_status:   newStatus,
+    p_change_qty:   changeQty,
+    p_reason:       reason ?? null,
+    p_executed_by:  executedBy,
+  })
 
-    if (src.status === newStatus) return { error: '変更先ステータスが現在と同じです' }
-
-    const availableQty = Math.max(0, (src.on_hand_qty ?? 0) - (src.allocated_qty ?? 0))
-    if (changeQty > availableQty) {
-      return { error: `引当可能数（${availableQty}）を超えるステータス変更はできません` }
-    }
-
-    // ── Step 2: 元在庫の on_hand_qty を減算 ─────────────────────
-    const { error: srcUpdateErr } = await dml('inventory')
-      .update({ on_hand_qty: src.on_hand_qty - changeQty })
-      .eq('id', inventoryId)
-
-    if (srcUpdateErr) throw new Error(`元在庫更新エラー: ${srcUpdateErr.message}`)
-
-    // ── Step 3: 変更先を検索（同一 product×location×received_date + newStatus）
-    const baseQuery = supabase
-      .from('inventory')
-      .select('id, on_hand_qty')
-      .eq('product_id',  src.product_id)
-      .eq('location_id', src.location_id)
-      .eq('status',      newStatus)
-
-    const dstQuery = src.received_date === null
-      ? baseQuery.is('received_date', null)
-      : baseQuery.eq('received_date', src.received_date)
-
-    const { data: dstRaw } = await dstQuery.maybeSingle()
-    type DstRow = { id: string; on_hand_qty: number }
-    const dst = dstRaw as unknown as DstRow | null
-
-    // ── Step 4: 変更先 upsert ────────────────────────────────────
-    if (dst) {
-      const { error: dstUpdateErr } = await dml('inventory')
-        .update({ on_hand_qty: (dst.on_hand_qty ?? 0) + changeQty })
-        .eq('id', dst.id)
-      if (dstUpdateErr) throw new Error(`変更先更新エラー: ${dstUpdateErr.message}`)
-    } else {
-      const { error: dstInsertErr } = await dml('inventory')
-        .insert({
-          product_id:    src.product_id,
-          location_id:   src.location_id,
-          on_hand_qty:   changeQty,
-          allocated_qty: 0,
-          status:        newStatus,
-          received_date: src.received_date ?? null,
-        })
-      if (dstInsertErr) throw new Error(`変更先登録エラー: ${dstInsertErr.message}`)
-    }
-
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
-  }
+  if (error) return { error: String(error) }
+  return { error: data?.error ?? null }
 }

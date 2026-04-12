@@ -190,6 +190,36 @@ export const SHIPPING_STATUS_CONFIG: Record<
   },
 }
 
+// ─── 在庫操作履歴 ────────────────────────────────────────────
+
+export type InventoryTransactionType =
+  | 'move'
+  | 'adjust_increase'
+  | 'adjust_decrease'
+  | 'adjust_set'
+  | 'status_change'
+
+export interface InventoryTransaction {
+  id:                  string
+  transactionType:     InventoryTransactionType
+  inventoryId:         string | null
+  productId:           string
+  fromLocationId:      string | null
+  toLocationId:        string | null
+  fromStatus:          InventoryStatus | null
+  toStatus:            InventoryStatus | null
+  qty:                 number
+  beforeOnHandQty:     number | null
+  afterOnHandQty:      number | null
+  beforeAllocatedQty:  number | null
+  afterAllocatedQty:   number | null
+  receivedDate:        string | null
+  reason:              string | null
+  note:                string | null
+  executedBy:          string | null
+  createdAt:           string
+}
+
 // ─── 出庫指示 ────────────────────────────────────────────────
 
 export interface ShippingOrderItem {
