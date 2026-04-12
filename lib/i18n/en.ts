@@ -38,6 +38,9 @@ export const en: Translations = {
     groupInventory: 'Inventory',
     groupOutbound:  'Outbound',
     groupSettings:  'Settings',
+    groupAdmin:     'Administration',
+    adminTenants:   'Clients',
+    adminWarehouses:'Warehouses',
   },
 
   header: {
@@ -427,6 +430,31 @@ export const en: Translations = {
     modalWarehouseTitle:         'New Warehouse',
     errWarehouseName:            'Please enter a warehouse name',
     emptyWarehouses:             'No warehouses found',
+  },
+
+  admin: {
+    tenantsTitle:              'Client Management',
+    tenantsSubtitle:           'Add, activate, or deactivate clients (tenants)',
+    tenantCode:                'Client Code',
+    tenantCodePlaceholder:     'e.g. T-003',
+    tenantName:                'Client Name',
+    tenantNamePlaceholder:     'e.g. ABC Logistics Co.',
+    colTenantCode:             'Code',
+    colTenantName:             'Client Name',
+    colStatus:                 'Status',
+    colWarehouseCount:         'Warehouses',
+    searchTenantsPlaceholder:  'Search by code or name',
+    modalTenantTitle:          'Add Client',
+    errTenantName:             'Please enter a client name',
+    errTenantCode:             'Please enter a client code',
+    errTenantCodeFormat:       'Use alphanumeric characters and hyphens (e.g. T-001)',
+    emptyTenants:              'No clients registered',
+    warehousesTitle:           'Warehouse Management',
+    warehousesSubtitle:        'Manage warehouses per client',
+    selectTenantLabel:         'Client',
+    noTenantSelected:          'Select a client to view its warehouses',
+    accessDeniedTitle:         'Access Denied',
+    accessDeniedDesc:          'This page is only accessible to administrators.',
   },
 
   status: {

@@ -38,6 +38,9 @@ export const ja: Translations = {
     groupInventory: '在庫',
     groupOutbound:  '出庫',
     groupSettings:  '設定',
+    groupAdmin:     'システム管理',
+    adminTenants:   '荷主管理',
+    adminWarehouses:'倉庫管理',
   },
 
   header: {
@@ -427,6 +430,31 @@ export const ja: Translations = {
     modalWarehouseTitle:         '倉庫マスタ登録',
     errWarehouseName:            '倉庫名を入力してください',
     emptyWarehouses:             '倉庫がありません',
+  },
+
+  admin: {
+    tenantsTitle:              '荷主管理',
+    tenantsSubtitle:           '荷主（テナント）の追加・有効化・無効化を行います',
+    tenantCode:                '荷主コード',
+    tenantCodePlaceholder:     '例: T-003',
+    tenantName:                '荷主名',
+    tenantNamePlaceholder:     '例: 株式会社○○物流',
+    colTenantCode:             '荷主コード',
+    colTenantName:             '荷主名',
+    colStatus:                 '状態',
+    colWarehouseCount:         '倉庫数',
+    searchTenantsPlaceholder:  'コード・荷主名で検索',
+    modalTenantTitle:          '荷主を追加',
+    errTenantName:             '荷主名を入力してください',
+    errTenantCode:             '荷主コードを入力してください',
+    errTenantCodeFormat:       '英数字・ハイフンで入力してください（例: T-001）',
+    emptyTenants:              '荷主が登録されていません',
+    warehousesTitle:           '倉庫管理',
+    warehousesSubtitle:        '荷主ごとの倉庫を管理します',
+    selectTenantLabel:         '対象荷主',
+    noTenantSelected:          '荷主を選択すると倉庫一覧が表示されます',
+    accessDeniedTitle:         'アクセス権限がありません',
+    accessDeniedDesc:          'このページは管理者のみアクセスできます。',
   },
 
   status: {

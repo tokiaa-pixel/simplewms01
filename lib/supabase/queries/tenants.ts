@@ -67,6 +67,78 @@ export async function fetchWarehousesForTenant(tenantId: string): Promise<{
 }
 
 // =============================================================
+// 荷主一覧取得（全ステータス、管理者用）
+// =============================================================
+
+export async function fetchAllTenants(): Promise<{
+  data:  Tenant[]
+  error: string | null
+}> {
+  const { data, error } = await supabase
+    .from('tenants')
+    .select('id, tenant_code, tenant_name, status')
+    .order('tenant_code')
+
+  if (error) return { data: [], error: error.message }
+
+  type Row = { id: string; tenant_code: string; tenant_name: string; status: string }
+  return {
+    data: (data as unknown as Row[]).map((r) => ({
+      id:     r.id,
+      code:   r.tenant_code,
+      name:   r.tenant_name,
+      status: r.status as Tenant['status'],
+    })),
+    error: null,
+  }
+}
+
+// =============================================================
+// 荷主新規登録（管理者用）
+// =============================================================
+
+export async function createTenant(params: {
+  code: string
+  name: string
+}): Promise<{ data: Tenant | null; error: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase.from('tenants') as any)
+    .insert({
+      tenant_code: params.code.trim(),
+      tenant_name: params.name.trim(),
+      status:      'active',
+    })
+    .select('id, tenant_code, tenant_name, status')
+    .single()
+
+  if (error) return { data: null, error: error.message }
+
+  type Row = { id: string; tenant_code: string; tenant_name: string; status: string }
+  const r = data as unknown as Row
+  return {
+    data: { id: r.id, code: r.tenant_code, name: r.tenant_name, status: r.status as Tenant['status'] },
+    error: null,
+  }
+}
+
+// =============================================================
+// 荷主ステータス切替（active ↔ inactive）（管理者用）
+// =============================================================
+
+export async function toggleTenantStatus(
+  id:            string,
+  currentStatus: string,
+): Promise<{ error: string | null }> {
+  const next = currentStatus === 'active' ? 'inactive' : 'active'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase.from('tenants') as any)
+    .update({ status: next })
+    .eq('id', id)
+
+  return { error: error?.message ?? null }
+}
+
+// =============================================================
 // 倉庫一覧取得（全ステータス、マスタ管理用）
 // =============================================================
 

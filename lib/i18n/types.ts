@@ -41,6 +41,9 @@ export interface Translations {
     groupInventory: string
     groupOutbound: string
     groupSettings: string
+    groupAdmin: string
+    adminTenants: string
+    adminWarehouses: string
   }
   header: {
     menuOpen: string
@@ -423,6 +426,33 @@ export interface Translations {
     modalWarehouseTitle: string
     errWarehouseName: string
     emptyWarehouses: string
+  }
+  admin: {
+    // 荷主管理ページ
+    tenantsTitle: string
+    tenantsSubtitle: string
+    tenantCode: string
+    tenantCodePlaceholder: string
+    tenantName: string
+    tenantNamePlaceholder: string
+    colTenantCode: string
+    colTenantName: string
+    colStatus: string
+    colWarehouseCount: string
+    searchTenantsPlaceholder: string
+    modalTenantTitle: string
+    errTenantName: string
+    errTenantCode: string
+    errTenantCodeFormat: string
+    emptyTenants: string
+    // 倉庫管理ページ
+    warehousesTitle: string
+    warehousesSubtitle: string
+    selectTenantLabel: string
+    noTenantSelected: string
+    // 共通
+    accessDeniedTitle: string
+    accessDeniedDesc: string
   }
   status: {
     arrival_pending: string

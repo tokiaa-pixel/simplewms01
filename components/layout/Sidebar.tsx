@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslation } from '@/lib/i18n'
 import { useTenant } from '@/store/TenantContext'
+import { useAuth } from '@/store/AuthContext'
 import {
   LayoutDashboard,
   ClipboardList,
@@ -16,6 +17,7 @@ import {
   Package,
   Building2,
   Warehouse,
+  ShieldCheck,
 } from 'lucide-react'
 
 interface SidebarProps {
@@ -33,6 +35,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { t } = useTranslation('nav')
   const { t: th } = useTranslation('header')
+  const { user } = useAuth()
   const {
     currentTenant, currentWarehouse,
     availableTenants, availableWarehouses,
@@ -79,6 +82,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         { href: '/master', label: t('master'), icon: Settings },
       ],
     },
+    ...(user?.role === 'admin' ? [{
+      label: t('groupAdmin'),
+      admin: true,
+      items: [
+        { href: '/admin/tenants',    label: t('adminTenants'),    icon: Building2 },
+        { href: '/admin/warehouses', label: t('adminWarehouses'), icon: Warehouse },
+      ],
+    }] : []),
   ]
 
   return (
@@ -131,12 +142,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           {navGroups.map((group, gi) => (
             <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
               {group.label && (
-                <p
-                  className="px-5 pb-1.5 text-[9px] font-bold uppercase tracking-widest"
-                  style={{ color: 'rgba(255,255,255,0.35)' }}
-                >
-                  {group.label}
-                </p>
+                <div className="px-5 pb-1.5 flex items-center gap-1.5">
+                  {'admin' in group && group.admin && (
+                    <ShieldCheck size={9} style={{ color: 'rgba(251,191,36,0.7)' }} className="flex-shrink-0" />
+                  )}
+                  <p
+                    className="text-[9px] font-bold uppercase tracking-widest"
+                    style={{ color: 'admin' in group && group.admin ? 'rgba(251,191,36,0.7)' : 'rgba(255,255,255,0.35)' }}
+                  >
+                    {group.label}
+                  </p>
+                </div>
               )}
               <ul className="space-y-0.5 px-2">
                 {group.items.map((item) => {
