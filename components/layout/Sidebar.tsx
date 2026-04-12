@@ -59,8 +59,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     {
       label: t('groupOutbound'),
       items: [
-        { href: '/shipping',       label: t('shipping'),      icon: Truck },
         { href: '/shipping/input', label: t('shippingInput'), icon: PackageMinus },
+        { href: '/shipping',       label: t('shipping'),      icon: Truck },
       ],
     },
     {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import {
   ClipboardList,
@@ -9,53 +9,81 @@ import {
   CheckCircle,
   Truck,
   ScanLine,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
-import { useWms } from '@/store/WmsContext'
 import {
-  type ShippingOrder,
   type ShippingStatus,
   SHIPPING_STATUS_CONFIG,
 } from '@/lib/types'
 import { todayIso } from '@/lib/utils'
 import { useTranslation } from '@/lib/i18n'
+import {
+  type ShippingOrderSummary,
+  type ShippingLineItem,
+  fetchShippingOrders,
+  fetchShippingOrderLines,
+  startPickingShipping,
+  completeShippingInspection,
+  confirmShippingOrder,
+} from '@/lib/supabase/queries/shippings'
 
-// ─── ステータスバッジ ──────────────────────────────────────────
+// =============================================================
+// ローカル型（モーダル用）
+// =============================================================
+
+/** モーダルに渡す出庫指示データ（サマリ + 明細） */
+type ShippingOrderDetail = ShippingOrderSummary & {
+  items: ShippingLineItem[]
+  itemsLoaded: boolean
+}
+
+// =============================================================
+// ステータスバッジ
+// =============================================================
 
 function ShippingStatusBadge({ status }: { status: ShippingStatus }) {
   const { t } = useTranslation('status')
   const cfg = SHIPPING_STATUS_CONFIG[status]
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}
-    >
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
       {t(`shipping_${status}` as Parameters<typeof t>[0])}
     </span>
   )
 }
 
-// ─── ① ピッキングモーダル（pending → picking） ────────────────
+// =============================================================
+// ① ピッキングモーダル（pending → picking）
+// =============================================================
 
 function PickingModal({
   order,
   onClose,
+  onUpdated,
 }: {
-  order: ShippingOrder
+  order: ShippingOrderDetail
   onClose: () => void
+  onUpdated: (id: string, status: ShippingStatus) => void
 }) {
-  const { t } = useTranslation('shipping')
+  const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
-  const { startPicking } = useWms()
-  const [done, setDone] = useState(false)
+  const [done,    setDone]    = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
 
   const sortedItems = [...order.items].sort((a, b) =>
     a.locationCode.localeCompare(b.locationCode)
   )
 
-  const handleStart = () => {
-    startPicking(order.id)
+  const handleStart = async () => {
+    setLoading(true)
+    const { error: err } = await startPickingShipping(order.id)
+    setLoading(false)
+    if (err) { setError(err); return }
+    onUpdated(order.id, 'picking')
     setDone(true)
   }
 
@@ -64,14 +92,10 @@ function PickingModal({
       <Modal title={t('pickingModalTitle')} onClose={onClose} size="sm">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <CheckCircle size={40} className="text-blue-500" />
-          <p className="text-sm font-semibold text-slate-700">
-            {t('pickingStarted')}
-          </p>
+          <p className="text-sm font-semibold text-slate-700">{t('pickingStarted')}</p>
           <p className="text-xs text-slate-500">{order.code}</p>
-          <button
-            onClick={onClose}
-            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
-          >
+          <button onClick={onClose}
+            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors">
             {tc('close')}
           </button>
         </div>
@@ -82,30 +106,26 @@ function PickingModal({
   return (
     <Modal title={`${t('pickingListTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
-        {/* ヘッダー情報 */}
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
-          {[
-            [t('detailCode'), <span key="code" className="font-mono font-medium">{order.code}</span>],
-            [t('detailCustomer'), order.customerName],
+          {([
+            [t('detailCode'),         <span key="c" className="font-mono font-medium">{order.code}</span>],
+            [t('detailCustomer'),     order.customerName],
             [t('detailScheduledDate'), order.requestedDate],
-            [t('detailItemCount'), `${order.items.length} ${t('cardItemUnit')}`],
-          ].map(([label, value], i) => (
+            [t('detailItemCount'),    `${order.lineCount} ${t('cardItemUnit')}`],
+          ] as [string, React.ReactNode][]).map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</dt>
-              <dd className="text-xs text-slate-800 font-medium">
-                {value as React.ReactNode}
-              </dd>
+              <dd className="text-xs text-slate-800 font-medium">{value}</dd>
             </div>
           ))}
         </div>
 
-        {order.note && (
+        {order.memo && (
           <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-700">
-            {order.note}
+            {order.memo}
           </div>
         )}
 
-        {/* ピッキングリスト */}
         <div>
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
             {t('pickingListTitle')}
@@ -126,7 +146,7 @@ function PickingModal({
                   <tr key={item.id}>
                     <td className="px-4 py-3">
                       <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                        {item.locationCode}
+                        {item.locationCode || '—'}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-blue-600">{item.productCode}</td>
@@ -145,19 +165,20 @@ function PickingModal({
           </div>
         </div>
 
-        {/* フッター */}
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <AlertCircle size={12} /> {error}
+          </p>
+        )}
+
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
-          <button
-            onClick={onClose}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-          >
+          <button onClick={onClose}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
             {tc('cancel')}
           </button>
-          <button
-            onClick={handleStart}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid transition-colors font-medium flex items-center justify-center gap-2"
-          >
-            <ScanLine size={15} />
+          <button onClick={handleStart} disabled={loading}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={15} />}
             {t('pickingStartBtn')}
           </button>
         </div>
@@ -166,43 +187,52 @@ function PickingModal({
   )
 }
 
-// ─── ② 検品モーダル（picking → inspected） ───────────────────
+// =============================================================
+// ② 検品モーダル（picking → inspected）
+// =============================================================
 
 function InspectionModal({
   order,
   onClose,
+  onUpdated,
 }: {
-  order: ShippingOrder
+  order: ShippingOrderDetail
   onClose: () => void
+  onUpdated: (id: string, status: ShippingStatus, updatedItems: ShippingLineItem[]) => void
 }) {
-  const { t } = useTranslation('shipping')
+  const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
-  const { completeInspection } = useWms()
   const [pickedQty, setPickedQty] = useState<Record<string, string>>(
-    () =>
-      Object.fromEntries(
-        order.items.map((i) => [i.id, String(i.orderedQuantity)])
-      )
+    () => Object.fromEntries(order.items.map((i) => [i.id, String(i.orderedQuantity)]))
   )
-  const [error, setError] = useState('')
-  const [done, setDone] = useState(false)
+  const [error,   setError]   = useState('')
+  const [loading, setLoading] = useState(false)
+  const [done,    setDone]    = useState(false)
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     for (const item of order.items) {
       const qty = parseInt(pickedQty[item.id] ?? '0') || 0
       if (qty < 0 || qty > item.orderedQuantity) {
-        setError(
-          `${item.productName}: 0〜${item.orderedQuantity}`
-        )
+        setError(`${item.productName}: 0〜${item.orderedQuantity}`)
         return
       }
     }
 
+    setLoading(true)
     const pickedItems = order.items.map((item) => ({
-      itemId: item.id,
+      lineId:   item.id,
+      pickedQty: parseInt(pickedQty[item.id] ?? '0') || 0,
+    }))
+
+    const { error: err } = await completeShippingInspection(order.id, pickedItems)
+    setLoading(false)
+    if (err) { setError(err); return }
+
+    const updatedItems: ShippingLineItem[] = order.items.map((item) => ({
+      ...item,
       pickedQuantity: parseInt(pickedQty[item.id] ?? '0') || 0,
     }))
-    completeInspection(order.id, pickedItems)
+    onUpdated(order.id, 'inspected', updatedItems)
     setDone(true)
   }
 
@@ -213,10 +243,8 @@ function InspectionModal({
           <CheckCircle size={40} className="text-purple-500" />
           <p className="text-sm font-semibold text-slate-700">{t('inspectionDone')}</p>
           <p className="text-xs text-slate-500">{order.code}</p>
-          <button
-            onClick={onClose}
-            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
-          >
+          <button onClick={onClose}
+            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors">
             {tc('close')}
           </button>
         </div>
@@ -227,24 +255,19 @@ function InspectionModal({
   return (
     <Modal title={`${t('inspectionModalTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
-        {/* ヘッダー */}
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
-          {[
-            [t('detailCode'), <span key="code" className="font-mono font-medium">{order.code}</span>],
+          {([
+            [t('detailCode'),     <span key="c" className="font-mono font-medium">{order.code}</span>],
             [t('detailCustomer'), order.customerName],
-          ].map(([label, value], i) => (
+          ] as [string, React.ReactNode][]).map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</dt>
-              <dd className="text-xs text-slate-800 font-medium">
-                {value as React.ReactNode}
-              </dd>
+              <dd className="text-xs text-slate-800 font-medium">{value}</dd>
             </div>
           ))}
         </div>
-
         <p className="text-xs text-slate-500">{t('inspectionNote')}</p>
 
-        {/* 検品テーブル */}
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <thead>
@@ -259,28 +282,18 @@ function InspectionModal({
             <tbody className="divide-y divide-slate-100">
               {order.items.map((item) => {
                 const picked = parseInt(pickedQty[item.id] ?? '0') || 0
-                const diff = picked - item.orderedQuantity
+                const diff   = picked - item.orderedQuantity
                 return (
                   <tr key={item.id}>
-                    <td className="px-4 py-3 font-mono text-slate-600">{item.locationCode}</td>
+                    <td className="px-4 py-3 font-mono text-slate-600">{item.locationCode || '—'}</td>
                     <td className="px-4 py-3 text-slate-700">{item.productName}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
-                      {item.orderedQuantity}
-                      <span className="text-slate-400 ml-1">{item.unit}</span>
+                      {item.orderedQuantity}<span className="text-slate-400 ml-1">{item.unit}</span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <input
-                        type="number"
-                        min="0"
-                        max={item.orderedQuantity}
+                      <input type="number" min="0" max={item.orderedQuantity}
                         value={pickedQty[item.id] ?? ''}
-                        onChange={(e) => {
-                          setPickedQty((prev) => ({
-                            ...prev,
-                            [item.id]: e.target.value,
-                          }))
-                          setError('')
-                        }}
+                        onChange={(e) => { setPickedQty((p) => ({ ...p, [item.id]: e.target.value })); setError('') }}
                         className="w-20 border border-slate-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-brand-teal"
                       />
                     </td>
@@ -301,23 +314,17 @@ function InspectionModal({
         </div>
 
         {error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-            {error}
-          </p>
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
         )}
 
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
-          <button
-            onClick={onClose}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-          >
+          <button onClick={onClose}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
             {tc('cancel')}
           </button>
-          <button
-            onClick={handleComplete}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2"
-          >
-            <CheckCircle size={15} />
+          <button onClick={handleComplete} disabled={loading}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={15} />}
             {t('inspectionCompleteBtn')}
           </button>
         </div>
@@ -326,26 +333,35 @@ function InspectionModal({
   )
 }
 
-// ─── ③ 出庫確定モーダル（inspected → shipped） ───────────────
+// =============================================================
+// ③ 出庫確定モーダル（inspected → shipped）
+// =============================================================
 
 function ConfirmShippingModal({
   order,
   onClose,
+  onUpdated,
 }: {
-  order: ShippingOrder
+  order: ShippingOrderDetail
   onClose: () => void
+  onUpdated: (id: string, status: ShippingStatus) => void
 }) {
-  const { t } = useTranslation('shipping')
+  const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
-  const { confirmShipping } = useWms()
   const [shippedDate, setShippedDate] = useState(todayIso())
-  const [done, setDone] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
+  const [done,    setDone]    = useState(false)
 
   const totalOrdered = order.items.reduce((s, i) => s + i.orderedQuantity, 0)
-  const totalPicked = order.items.reduce((s, i) => s + i.pickedQuantity, 0)
+  const totalPicked  = order.items.reduce((s, i) => s + i.pickedQuantity,  0)
 
-  const handleConfirm = () => {
-    confirmShipping(order.id, shippedDate.replace(/-/g, '/'))
+  const handleConfirm = async () => {
+    setLoading(true)
+    const { error: err } = await confirmShippingOrder(order.id)
+    setLoading(false)
+    if (err) { setError(err); return }
+    onUpdated(order.id, 'shipped')
     setDone(true)
   }
 
@@ -356,10 +372,8 @@ function ConfirmShippingModal({
           <CheckCircle size={40} className="text-green-500" />
           <p className="text-sm font-semibold text-slate-700">{t('confirmDone')}</p>
           <p className="text-xs text-slate-500">{order.code}</p>
-          <button
-            onClick={onClose}
-            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
-          >
+          <button onClick={onClose}
+            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors">
             {tc('close')}
           </button>
         </div>
@@ -370,24 +384,22 @@ function ConfirmShippingModal({
   return (
     <Modal title={`${t('confirmModalTitle')} - ${order.code}`} onClose={onClose} size="md">
       <div className="space-y-5">
-        {/* サマリ */}
         <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 space-y-1.5">
-          {[
-            [t('detailCode'), order.code],
-            [t('detailCustomer'), order.customerName],
+          {([
+            [t('detailCode'),          order.code],
+            [t('detailCustomer'),      order.customerName],
             [t('detailScheduledDate'), order.requestedDate],
-            [t('detailItemCount'), `${order.items.length} ${t('cardItemUnit')}`],
-            [t('detailTotalOrdered'), `${totalOrdered} ${tc('pieces')}`],
-            [t('detailTotalPicked'), `${totalPicked} ${tc('pieces')}`],
-          ].map(([label, value]) => (
-            <div key={label} className="flex items-center gap-2">
+            [t('detailItemCount'),     `${order.lineCount} ${t('cardItemUnit')}`],
+            [t('detailTotalOrdered'),  `${totalOrdered} ${tc('pieces')}`],
+            [t('detailTotalPicked'),   `${totalPicked} ${tc('pieces')}`],
+          ] as [string, React.ReactNode][]).map(([label, value]) => (
+            <div key={String(label)} className="flex items-center gap-2">
               <dt className="text-xs text-green-700 w-28 flex-shrink-0">{label}</dt>
               <dd className="text-xs text-green-900 font-medium">{value}</dd>
             </div>
           ))}
         </div>
 
-        {/* 品目サマリ */}
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <thead>
@@ -405,9 +417,7 @@ function ConfirmShippingModal({
                     {item.orderedQuantity} {item.unit}
                   </td>
                   <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${
-                    item.pickedQuantity < item.orderedQuantity
-                      ? 'text-amber-600'
-                      : 'text-green-700'
+                    item.pickedQuantity < item.orderedQuantity ? 'text-amber-600' : 'text-green-700'
                   }`}>
                     {item.pickedQuantity} {item.unit}
                   </td>
@@ -417,31 +427,29 @@ function ConfirmShippingModal({
           </table>
         </div>
 
-        {/* 出荷日 */}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">
             {t('shipDate')} <span className="text-red-500">*</span>
           </label>
-          <input
-            type="date"
-            value={shippedDate}
-            onChange={(e) => setShippedDate(e.target.value)}
+          <input type="date" value={shippedDate} onChange={(e) => setShippedDate(e.target.value)}
             className="border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
           />
         </div>
 
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <AlertCircle size={12} /> {error}
+          </p>
+        )}
+
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
-          <button
-            onClick={onClose}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-          >
+          <button onClick={onClose}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
             {tc('cancel')}
           </button>
-          <button
-            onClick={handleConfirm}
-            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
-          >
-            <Truck size={15} />
+          <button onClick={handleConfirm} disabled={loading}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Truck size={15} />}
             {t('confirmBtn')}
           </button>
         </div>
@@ -450,43 +458,39 @@ function ConfirmShippingModal({
   )
 }
 
-// ─── ④ 詳細モーダル（shipped / cancelled） ────────────────────
+// =============================================================
+// ④ 詳細モーダル（shipped / cancelled）
+// =============================================================
 
 function DetailModal({
   order,
   onClose,
 }: {
-  order: ShippingOrder
+  order: ShippingOrderDetail
   onClose: () => void
 }) {
   const { t } = useTranslation('shipping')
-
   return (
     <Modal title={`${t('detailModalTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
-          {[
-            [t('detailCode'), <span key="code" className="font-mono">{order.code}</span>],
-            [t('colStatus'), <ShippingStatusBadge key="status" status={order.status} />],
-            [t('detailCustomer'), order.customerName],
+          {([
+            [t('detailCode'),          <span key="c" className="font-mono">{order.code}</span>],
+            [t('colStatus'),           <ShippingStatusBadge key="s" status={order.status} />],
+            [t('detailCustomer'),      order.customerName],
             [t('detailScheduledDate'), order.requestedDate],
-            ...(order.shippedDate
-              ? [[t('detailShipDate'), order.shippedDate]]
-              : []),
-            [t('detailCreated'), order.createdAt],
-          ].map(([label, value], i) => (
+            [t('detailCreated'),       order.createdAt],
+          ] as [string, React.ReactNode][]).map(([label, value], i) => (
             <div key={i} className="flex items-center gap-2">
               <dt className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</dt>
-              <dd className="text-xs text-slate-800 font-medium">
-                {value as React.ReactNode}
-              </dd>
+              <dd className="text-xs text-slate-800 font-medium">{value}</dd>
             </div>
           ))}
         </div>
 
-        {order.note && (
+        {order.memo && (
           <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-700">
-            {order.note}
+            {order.memo}
           </div>
         )}
 
@@ -503,13 +507,11 @@ function DetailModal({
             <tbody className="divide-y divide-slate-100">
               {order.items.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-4 py-3 font-mono text-slate-600">{item.locationCode}</td>
+                  <td className="px-4 py-3 font-mono text-slate-600">{item.locationCode || '—'}</td>
                   <td className="px-4 py-3 text-slate-700">{item.productName}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{item.orderedQuantity} {item.unit}</td>
                   <td className={`px-4 py-3 text-right tabular-nums font-medium ${
-                    item.pickedQuantity < item.orderedQuantity
-                      ? 'text-amber-600'
-                      : 'text-green-700'
+                    item.pickedQuantity < item.orderedQuantity ? 'text-amber-600' : 'text-green-700'
                   }`}>
                     {item.pickedQuantity} {item.unit}
                   </td>
@@ -523,42 +525,99 @@ function DetailModal({
   )
 }
 
-// ─── モーダルの種類を判定 ─────────────────────────────────────
+// =============================================================
+// モーダル種別判定
+// =============================================================
 
-function getModalType(
-  status: ShippingStatus
-): 'picking' | 'inspection' | 'confirm' | 'detail' {
+function getModalType(status: ShippingStatus): 'picking' | 'inspection' | 'confirm' | 'detail' {
   switch (status) {
-    case 'pending': return 'picking'
-    case 'picking': return 'inspection'
+    case 'pending':   return 'picking'
+    case 'picking':   return 'inspection'
     case 'inspected': return 'confirm'
-    default: return 'detail'
+    default:          return 'detail'
   }
 }
 
-// ─── メインページ ─────────────────────────────────────────────
+// =============================================================
+// メインページ
+// =============================================================
 
-export default function ShippingMenuPage() {
-  const { t } = useTranslation('shipping')
+export default function ShippingPage() {
+  const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('status')
-  const { state } = useWms()
-  const [activeTab, setActiveTab] = useState<'all' | ShippingStatus>('all')
-  const [search, setSearch] = useState('')
-  const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null)
+
+  // ── データ ───────────────────────────────────────────────────
+  const [orders,     setOrders]     = useState<ShippingOrderDetail[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+
+  // ── UI 状態 ──────────────────────────────────────────────────
+  const [activeTab,       setActiveTab]       = useState<'all' | ShippingStatus>('all')
+  const [search,          setSearch]          = useState('')
+  const [selectedId,      setSelectedId]      = useState<string | null>(null)
+  const [modalLoading,    setModalLoading]    = useState(false)
   const tableRef = useRef<HTMLDivElement>(null)
 
-  const orders = state.shippingOrders
+  // ── 一覧取得 ─────────────────────────────────────────────────
+  const loadOrders = useCallback(async () => {
+    const { data, error } = await fetchShippingOrders()
+    if (error) { setFetchError(error); return }
+    // ShippingOrderSummary → ShippingOrderDetail（items 未ロード）
+    setOrders(
+      data.map((s) => ({ ...s, items: [], itemsLoaded: false }))
+    )
+  }, [])
 
-  const counts = useMemo(
-    () => ({
-      pending: orders.filter((o) => o.status === 'pending').length,
-      picking: orders.filter((o) => o.status === 'picking').length,
-      inspected: orders.filter((o) => o.status === 'inspected').length,
-      shipped: orders.filter((o) => o.status === 'shipped').length,
-    }),
-    [orders]
-  )
+  useEffect(() => {
+    setLoading(true)
+    loadOrders().finally(() => setLoading(false))
+  }, [loadOrders])
+
+  // ── 行クリック：明細を遅延ロード ─────────────────────────────
+  const handleSelectOrder = useCallback(async (id: string) => {
+    setSelectedId(id)
+    const order = orders.find((o) => o.id === id)
+    if (!order || order.itemsLoaded) return
+
+    setModalLoading(true)
+    const { data } = await fetchShippingOrderLines(id)
+    if (data) {
+      setOrders((prev) =>
+        prev.map((o) => o.id === id ? { ...o, items: data, itemsLoaded: true } : o)
+      )
+    }
+    setModalLoading(false)
+  }, [orders])
+
+  // ── ステータス更新（モーダルからのコールバック） ─────────────
+  const handleOrderUpdated = useCallback((
+    id: string,
+    status: ShippingStatus,
+    updatedItems?: ShippingLineItem[],
+  ) => {
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (o.id !== id) return o
+        return {
+          ...o,
+          status,
+          ...(updatedItems ? { items: updatedItems } : {}),
+        }
+      })
+    )
+  }, [])
+
+  // ── モーダルを閉じる ─────────────────────────────────────────
+  const handleClose = () => setSelectedId(null)
+
+  // ── 集計 ─────────────────────────────────────────────────────
+  const counts = useMemo(() => ({
+    pending:   orders.filter((o) => o.status === 'pending').length,
+    picking:   orders.filter((o) => o.status === 'picking').length,
+    inspected: orders.filter((o) => o.status === 'inspected').length,
+    shipped:   orders.filter((o) => o.status === 'shipped').length,
+  }), [orders])
 
   const TABS = useMemo(() => [
     { value: 'all' as const,       label: t('tabAll') },
@@ -571,62 +630,55 @@ export default function ShippingMenuPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return orders.filter((o) => {
-      const matchTab = activeTab === 'all' || o.status === activeTab
-      const matchSearch =
-        !q ||
-        o.code.toLowerCase().includes(q) ||
-        o.customerName.toLowerCase().includes(q)
+      const matchTab    = activeTab === 'all' || o.status === activeTab
+      const matchSearch = !q || o.code.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q)
       return matchTab && matchSearch
     })
   }, [orders, activeTab, search])
 
   const handleOperationClick = (tab: 'all' | ShippingStatus) => {
     setActiveTab(tab)
-    setTimeout(() => {
-      tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 50)
+    setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
 
   const summaryItems = [
-    {
-      status: 'pending' as ShippingStatus,
-      label: t('summaryPending'),
-      count: counts.pending,
-      bg: 'bg-slate-50',
-      border: 'border-slate-200',
-      countColor: 'text-slate-700',
-    },
-    {
-      status: 'picking' as ShippingStatus,
-      label: t('summaryPicking'),
-      count: counts.picking,
-      bg: 'bg-blue-50',
-      border: 'border-blue-200',
-      countColor: 'text-blue-700',
-    },
-    {
-      status: 'inspected' as ShippingStatus,
-      label: t('summaryInspected'),
-      count: counts.inspected,
-      bg: 'bg-purple-50',
-      border: 'border-purple-200',
-      countColor: 'text-purple-700',
-    },
-    {
-      status: 'shipped' as ShippingStatus,
-      label: t('summaryShipped'),
-      count: counts.shipped,
-      bg: 'bg-green-50',
-      border: 'border-green-200',
-      countColor: 'text-green-700',
-    },
+    { status: 'pending'   as ShippingStatus, label: t('summaryPending'),   count: counts.pending,   bg: 'bg-slate-50',  border: 'border-slate-200',  countColor: 'text-slate-700'  },
+    { status: 'picking'   as ShippingStatus, label: t('summaryPicking'),   count: counts.picking,   bg: 'bg-blue-50',   border: 'border-blue-200',   countColor: 'text-blue-700'   },
+    { status: 'inspected' as ShippingStatus, label: t('summaryInspected'), count: counts.inspected, bg: 'bg-purple-50', border: 'border-purple-200', countColor: 'text-purple-700' },
+    { status: 'shipped'   as ShippingStatus, label: t('summaryShipped'),   count: counts.shipped,   bg: 'bg-green-50',  border: 'border-green-200',  countColor: 'text-green-700'  },
   ]
 
   const actionLabels: Record<'picking' | 'inspection' | 'confirm' | 'detail', string> = {
-    picking: t('actionPicking'),
+    picking:    t('actionPicking'),
     inspection: t('actionInspection'),
-    confirm: t('actionConfirm'),
-    detail: t('actionDetail'),
+    confirm:    t('actionConfirm'),
+    detail:     t('actionDetail'),
+  }
+
+  const selectedOrder = selectedId ? orders.find((o) => o.id === selectedId) ?? null : null
+
+  // ── ローディング ─────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="max-w-screen-xl flex items-center justify-center py-24 gap-3 text-slate-400">
+        <Loader2 size={20} className="animate-spin" />
+        <span className="text-sm">{tc('loading')}</span>
+      </div>
+    )
+  }
+
+  if (fetchError) {
+    return (
+      <div className="max-w-screen-xl">
+        <div className="bg-white rounded-lg border border-red-200 flex items-start gap-3 px-6 py-8 text-red-600">
+          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold">データの取得に失敗しました</p>
+            <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -637,10 +689,8 @@ export default function ShippingMenuPage() {
           <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
           <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
         </div>
-        <Link
-          href="/shipping/input"
-          className="flex items-center gap-2 px-4 py-2.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors"
-        >
+        <Link href="/shipping/input"
+          className="flex items-center gap-2 px-4 py-2.5 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors">
           <PackageMinus size={15} />
           {t('toInput')}
         </Link>
@@ -649,15 +699,11 @@ export default function ShippingMenuPage() {
       {/* ステータスサマリバー */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {summaryItems.map((item) => (
-          <button
-            key={item.status}
-            onClick={() => handleOperationClick(item.status)}
-            className={`${item.bg} border ${item.border} rounded-lg px-4 py-3 text-left hover:opacity-80 transition-opacity`}
-          >
+          <button key={item.status} onClick={() => handleOperationClick(item.status)}
+            className={`${item.bg} border ${item.border} rounded-lg px-4 py-3 text-left hover:opacity-80 transition-opacity`}>
             <p className="text-xs text-slate-500 mb-1">{item.label}</p>
             <p className={`text-2xl font-bold tabular-nums ${item.countColor}`}>
-              {item.count}
-              <span className="text-sm font-normal ml-1">{tc('countUnit')}</span>
+              {item.count}<span className="text-sm font-normal ml-1">{tc('countUnit')}</span>
             </p>
           </button>
         ))}
@@ -665,11 +711,8 @@ export default function ShippingMenuPage() {
 
       {/* 操作メニューカード */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        {/* ピッキング */}
-        <button
-          onClick={() => handleOperationClick('pending')}
-          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-blue-400 hover:shadow-sm transition-all group"
-        >
+        <button onClick={() => handleOperationClick('pending')}
+          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-blue-400 hover:shadow-sm transition-all group">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
               <ScanLine size={18} className="text-blue-600" />
@@ -680,19 +723,14 @@ export default function ShippingMenuPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-blue-600 tabular-nums">
-              {counts.pending}
-            </span>
+            <span className="text-2xl font-bold text-blue-600 tabular-nums">{counts.pending}</span>
             <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
           </div>
           <p className="text-xs text-slate-400 mt-2">{t('menuPickingDesc')}</p>
         </button>
 
-        {/* 検品 */}
-        <button
-          onClick={() => handleOperationClick('picking')}
-          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-purple-400 hover:shadow-sm transition-all group"
-        >
+        <button onClick={() => handleOperationClick('picking')}
+          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-purple-400 hover:shadow-sm transition-all group">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2.5 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors">
               <SearchIcon size={18} className="text-purple-600" />
@@ -703,19 +741,14 @@ export default function ShippingMenuPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-purple-600 tabular-nums">
-              {counts.picking}
-            </span>
+            <span className="text-2xl font-bold text-purple-600 tabular-nums">{counts.picking}</span>
             <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
           </div>
           <p className="text-xs text-slate-400 mt-2">{t('menuInspectionDesc')}</p>
         </button>
 
-        {/* 出庫確定 */}
-        <button
-          onClick={() => handleOperationClick('inspected')}
-          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-green-400 hover:shadow-sm transition-all group"
-        >
+        <button onClick={() => handleOperationClick('inspected')}
+          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-green-400 hover:shadow-sm transition-all group">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2.5 bg-green-50 rounded-lg group-hover:bg-green-100 transition-colors">
               <Truck size={18} className="text-green-600" />
@@ -726,9 +759,7 @@ export default function ShippingMenuPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-green-600 tabular-nums">
-              {counts.inspected}
-            </span>
+            <span className="text-2xl font-bold text-green-600 tabular-nums">{counts.inspected}</span>
             <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
           </div>
           <p className="text-xs text-slate-400 mt-2">{t('menuConfirmDesc')}</p>
@@ -743,26 +774,18 @@ export default function ShippingMenuPage() {
             <ClipboardList size={15} className="text-slate-400" />
             <span className="text-sm font-semibold text-slate-700">{t('listTitle')}</span>
           </div>
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            placeholder={t('searchPlaceholder')}
-            className="ml-2"
-          />
+          <SearchInput value={search} onChange={setSearch} placeholder={t('searchPlaceholder')} className="ml-2" />
         </div>
 
         {/* タブ */}
         <div className="flex border-b border-slate-200 bg-slate-50/60 overflow-x-auto">
           {TABS.map((tab) => {
             const isActive = activeTab === tab.value
-            const count =
-              tab.value === 'all'
-                ? orders.length
-                : orders.filter((o) => o.status === tab.value).length
+            const count = tab.value === 'all'
+              ? orders.length
+              : orders.filter((o) => o.status === tab.value).length
             return (
-              <button
-                key={tab.value}
-                onClick={() => setActiveTab(tab.value)}
+              <button key={tab.value} onClick={() => setActiveTab(tab.value)}
                 className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                   isActive
                     ? 'border-brand-teal text-brand-teal bg-white'
@@ -770,11 +793,9 @@ export default function ShippingMenuPage() {
                 }`}
               >
                 {tab.label}
-                <span
-                  className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                    isActive ? 'bg-brand-light text-brand-blue' : 'bg-slate-200 text-slate-500'
-                  }`}
-                >
+                <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                  isActive ? 'bg-brand-light text-brand-blue' : 'bg-slate-200 text-slate-500'
+                }`}>
                   {count}
                 </span>
               </button>
@@ -782,7 +803,7 @@ export default function ShippingMenuPage() {
           })}
         </div>
 
-        {/* モバイル：カード表示 */}
+        {/* モバイル：カード */}
         <div className="sm:hidden divide-y divide-slate-100">
           {filtered.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
@@ -792,14 +813,12 @@ export default function ShippingMenuPage() {
           ) : (
             filtered.map((order) => {
               const modalType = getModalType(order.status)
-              const nextActionLabel = actionLabels[modalType]
               const nextActionStyle = {
-                picking: 'text-blue-600 bg-blue-50',
+                picking:    'text-blue-600 bg-blue-50',
                 inspection: 'text-purple-600 bg-purple-50',
-                confirm: 'text-green-600 bg-green-50',
-                detail: 'text-slate-500 bg-slate-100',
+                confirm:    'text-green-600 bg-green-50',
+                detail:     'text-slate-500 bg-slate-100',
               }[modalType]
-
               return (
                 <div key={order.id} className="px-4 py-4">
                   <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -809,13 +828,11 @@ export default function ShippingMenuPage() {
                   <p className="text-sm font-medium text-slate-700 mb-2">{order.customerName}</p>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-500">
-                      {order.requestedDate} / {order.items.length} {t('cardItemUnit')}
+                      {order.requestedDate} / {order.lineCount} {t('cardItemUnit')}
                     </span>
-                    <button
-                      onClick={() => setSelectedOrder(order)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${nextActionStyle}`}
-                    >
-                      {nextActionLabel}
+                    <button onClick={() => handleSelectOrder(order.id)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${nextActionStyle}`}>
+                      {actionLabels[modalType]}
                     </button>
                   </div>
                 </div>
@@ -824,35 +841,23 @@ export default function ShippingMenuPage() {
           )}
         </div>
 
-        {/* デスクトップ：テーブル表示 */}
+        {/* デスクトップ：テーブル */}
         <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
-                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  {t('colCode')}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                  {t('colCustomer')}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  {t('colDate')}
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  {t('colItems')}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  {t('colStatus')}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">
-                  {t('colNextAction')}
-                </th>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colCode')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">{t('colCustomer')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colDate')}</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colItems')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colStatus')}</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colNextAction')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-14 text-center">
+                  <td colSpan={6} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <Truck size={28} />
                       <p className="text-sm">{t('empty')}</p>
@@ -862,44 +867,27 @@ export default function ShippingMenuPage() {
               ) : (
                 filtered.map((order) => {
                   const modalType = getModalType(order.status)
-                  const nextActionLabel = actionLabels[modalType]
-                  const nextActionStyle = {
-                    picking: 'text-blue-600 bg-blue-50 hover:bg-blue-100',
+                  const btnStyle = {
+                    picking:    'text-blue-600 bg-blue-50 hover:bg-blue-100',
                     inspection: 'text-purple-600 bg-purple-50 hover:bg-purple-100',
-                    confirm: 'text-green-600 bg-green-50 hover:bg-green-100',
-                    detail: 'text-slate-500 bg-slate-100 hover:bg-slate-200',
+                    confirm:    'text-green-700 bg-green-50 hover:bg-green-100',
+                    detail:     'text-slate-600 bg-slate-100 hover:bg-slate-200',
                   }[modalType]
-
                   return (
-                    <tr
-                      key={order.id}
-                      className="hover:bg-slate-50/60 transition-colors"
-                    >
+                    <tr key={order.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="px-5 py-3 whitespace-nowrap">
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="font-mono text-xs text-blue-600 font-medium hover:underline"
-                        >
-                          {order.code}
-                        </button>
+                        <span className="font-mono text-xs text-blue-600 font-medium">{order.code}</span>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{order.customerName}</td>
-                      <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">
-                        {order.requestedDate}
+                      <td className="px-4 py-3 text-slate-800 font-medium">{order.customerName}</td>
+                      <td className="px-4 py-3 text-slate-500 text-sm whitespace-nowrap">{order.requestedDate}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-600">
+                        {order.lineCount} {t('cardItemUnit')}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-700">
-                        {order.items.length}
-                        <span className="text-xs text-slate-400 ml-1">{t('cardItemUnit')}</span>
-                      </td>
+                      <td className="px-4 py-3"><ShippingStatusBadge status={order.status} /></td>
                       <td className="px-4 py-3">
-                        <ShippingStatusBadge status={order.status} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${nextActionStyle}`}
-                        >
-                          {nextActionLabel}
+                        <button onClick={() => handleSelectOrder(order.id)}
+                          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${btnStyle}`}>
+                          {actionLabels[modalType]}
                         </button>
                       </td>
                     </tr>
@@ -911,40 +899,27 @@ export default function ShippingMenuPage() {
         </div>
       </div>
 
-      {/* モーダル切替 */}
-      {selectedOrder && (() => {
-        const modalType = getModalType(selectedOrder.status)
-        if (modalType === 'picking') {
-          return (
-            <PickingModal
-              order={selectedOrder}
-              onClose={() => setSelectedOrder(null)}
-            />
-          )
-        }
-        if (modalType === 'inspection') {
-          return (
-            <InspectionModal
-              order={selectedOrder}
-              onClose={() => setSelectedOrder(null)}
-            />
-          )
-        }
-        if (modalType === 'confirm') {
-          return (
-            <ConfirmShippingModal
-              order={selectedOrder}
-              onClose={() => setSelectedOrder(null)}
-            />
-          )
-        }
-        return (
-          <DetailModal
-            order={selectedOrder}
-            onClose={() => setSelectedOrder(null)}
-          />
-        )
+      {/* モーダルローディング */}
+      {modalLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg px-6 py-4 flex items-center gap-3 text-sm text-slate-600">
+            <Loader2 size={16} className="animate-spin text-brand-teal" />
+            明細データを取得中...
+          </div>
+        </div>
+      )}
+
+      {/* モーダル */}
+      {selectedOrder && !modalLoading && (() => {
+        const type = getModalType(selectedOrder.status)
+        if (type === 'picking')    return <PickingModal    order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
+        if (type === 'inspection') return <InspectionModal order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
+        if (type === 'confirm')    return <ConfirmShippingModal order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
+        return <DetailModal order={selectedOrder} onClose={handleClose} />
       })()}
+
+      {/* ts unused var suppression */}
+      <span className="hidden">{ts('shipping_pending')}</span>
     </div>
   )
 }

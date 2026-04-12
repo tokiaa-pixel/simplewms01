@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client'
-import type { InventoryStatus } from '@/lib/types'
+import type { InventoryStatus, ShippingStatus } from '@/lib/types'
 
 // Supabase typed client が DML の Insert/Update 型を never に解決するため、
 // INSERT / UPDATE のみ any キャストで回避する。SELECT は typed client を使用。
@@ -420,6 +420,285 @@ export async function confirmShipping(params: {
 
     const { error: headerErr } = await dml('shipping_headers')
       .update({ status: newStatus })
+      .eq('id', headerId)
+
+    if (headerErr) throw new Error(`ヘッダー更新エラー: ${headerErr.message}`)
+
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
+  }
+}
+
+// =============================================================
+// 出庫指示一覧取得（shipping/page.tsx 用）
+// =============================================================
+
+// ─── Raw DB 型（一覧用） ──────────────────────────────────────
+
+type ShippingHeaderListRaw = {
+  id:           string
+  shipping_no:  string
+  shipping_date: string
+  status:       string
+  memo:         string | null
+  created_at:   string
+  customers:    { customer_name_ja: string } | null
+  shipping_lines: Array<{ id: string }>
+}
+
+/** 出庫指示一覧1行 */
+export type ShippingOrderSummary = {
+  id:           string
+  code:         string   // shipping_no
+  customerId:   string   // customer_id（詳細遷移用）
+  customerName: string
+  requestedDate: string  // 表示用フォーマット
+  status:       ShippingStatus
+  memo:         string | null
+  lineCount:    number
+  createdAt:    string
+}
+
+// ─── Raw DB 型（明細用） ──────────────────────────────────────
+
+type ShippingLineDetailRaw = {
+  id:            string
+  line_no:       number
+  requested_qty: number
+  shipped_qty:   number
+  products: {
+    product_code:    string
+    product_name_ja: string
+    unit:            string
+  } | null
+  shipping_allocations: Array<{
+    allocated_qty: number
+    inventory: {
+      locations: { location_code: string } | null
+    } | null
+  }>
+}
+
+/** 出庫指示明細1行 */
+export type ShippingLineItem = {
+  id:             string   // shipping_lines.id
+  lineNo:         number
+  productCode:    string
+  productName:    string
+  unit:           string
+  orderedQuantity: number  // requested_qty
+  pickedQuantity:  number  // shipped_qty（検品後に更新）
+  locationCode:    string  // 引当先ロケーション（複数ある場合はカンマ区切り）
+}
+
+// ─── ユーティリティ ───────────────────────────────────────────
+
+function toShippingStatus(raw: string): ShippingStatus {
+  if (
+    raw === 'pending' || raw === 'picking' ||
+    raw === 'inspected' || raw === 'shipped' || raw === 'cancelled'
+  ) return raw
+  return 'pending'
+}
+
+function formatDateDisplay(raw: string): string {
+  if (!raw) return ''
+  return new Date(raw).toLocaleDateString('ja-JP', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  })
+}
+
+// =============================================================
+// 出庫指示一覧取得
+// =============================================================
+
+export async function fetchShippingOrders(): Promise<{
+  data:  ShippingOrderSummary[]
+  error: string | null
+}> {
+  const { data, error } = await supabase
+    .from('shipping_headers')
+    .select(`
+      id, shipping_no, shipping_date, status, memo, created_at,
+      customers ( customer_name_ja ),
+      shipping_lines ( id )
+    `)
+    .order('created_at', { ascending: false })
+
+  if (error) return { data: [], error: error.message }
+
+  const rows = data as unknown as ShippingHeaderListRaw[]
+
+  return {
+    data: rows.map((r) => ({
+      id:           r.id,
+      code:         r.shipping_no,
+      customerId:   '',   // header に customer_id は含まれていないが一覧では不要
+      customerName: r.customers?.customer_name_ja ?? '',
+      requestedDate: formatDateDisplay(r.shipping_date),
+      status:       toShippingStatus(r.status),
+      memo:         r.memo,
+      lineCount:    r.shipping_lines.length,
+      createdAt:    formatDateDisplay(r.created_at),
+    })),
+    error: null,
+  }
+}
+
+// =============================================================
+// 出庫指示明細取得（モーダル表示用）
+// =============================================================
+
+export async function fetchShippingOrderLines(headerId: string): Promise<{
+  data:  ShippingLineItem[]
+  error: string | null
+}> {
+  const { data, error } = await supabase
+    .from('shipping_lines')
+    .select(`
+      id, line_no, requested_qty, shipped_qty,
+      products ( product_code, product_name_ja, unit ),
+      shipping_allocations (
+        allocated_qty,
+        inventory ( locations ( location_code ) )
+      )
+    `)
+    .eq('header_id', headerId)
+    .order('line_no')
+
+  if (error) return { data: [], error: error.message }
+
+  const rows = data as unknown as ShippingLineDetailRaw[]
+
+  return {
+    data: rows.map((r) => {
+      // 引当先ロケーションを集約（複数ある場合はカンマ区切り）
+      const locs = [
+        ...new Set(
+          r.shipping_allocations
+            .map((a) => a.inventory?.locations?.location_code)
+            .filter((v): v is string => !!v)
+        ),
+      ]
+      return {
+        id:             r.id,
+        lineNo:         r.line_no,
+        productCode:    r.products?.product_code    ?? '',
+        productName:    r.products?.product_name_ja ?? '',
+        unit:           r.products?.unit            ?? '',
+        orderedQuantity: Number(r.requested_qty),
+        pickedQuantity:  Number(r.shipped_qty),
+        locationCode:    locs.join(', '),
+      }
+    }),
+    error: null,
+  }
+}
+
+// =============================================================
+// ステータス遷移
+// =============================================================
+
+/** pending → picking */
+export async function startPickingShipping(headerId: string): Promise<{ error: string | null }> {
+  const { error } = await dml('shipping_headers')
+    .update({ status: 'picking' })
+    .eq('id', headerId)
+  return { error: error ? error.message : null }
+}
+
+/** picking → inspected（各明細の shipped_qty を更新してからステータス変更） */
+export async function completeShippingInspection(
+  headerId: string,
+  pickedItems: Array<{ lineId: string; pickedQty: number }>,
+): Promise<{ error: string | null }> {
+  try {
+    for (const item of pickedItems) {
+      const { error: lineErr } = await dml('shipping_lines')
+        .update({ shipped_qty: item.pickedQty })
+        .eq('id', item.lineId)
+      if (lineErr) throw new Error(`明細更新エラー: ${lineErr.message}`)
+    }
+    const { error: headerErr } = await dml('shipping_headers')
+      .update({ status: 'inspected' })
+      .eq('id', headerId)
+    if (headerErr) throw new Error(`ヘッダー更新エラー: ${headerErr.message}`)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
+  }
+}
+
+/**
+ * inspected → shipped
+ * 在庫の on_hand_qty / allocated_qty を減算し、ヘッダーを shipped に更新する。
+ */
+export async function confirmShippingOrder(headerId: string): Promise<{ error: string | null }> {
+  try {
+    // ── Step 1: 全明細 + 引当を取得 ──────────────────────────────
+    const { data: linesRaw, error: linesErr } = await supabase
+      .from('shipping_lines')
+      .select(`
+        id, shipped_qty,
+        shipping_allocations ( inventory_id, allocated_qty )
+      `)
+      .eq('header_id', headerId)
+
+    if (linesErr) throw new Error(`明細取得エラー: ${linesErr.message}`)
+
+    type LineWithAlloc = {
+      id: string
+      shipped_qty: number
+      shipping_allocations: Array<{ inventory_id: string; allocated_qty: number }>
+    }
+    const lines = linesRaw as unknown as LineWithAlloc[]
+
+    // ── Step 2: 在庫を減算 ────────────────────────────────────────
+    const allocByInventory = new Map<string, number>()
+    for (const line of lines) {
+      for (const a of line.shipping_allocations) {
+        // 引当数と実績数の小さい方を減算（過剰引当を防ぐ）
+        const deduct = Math.min(a.allocated_qty, line.shipped_qty)
+        allocByInventory.set(
+          a.inventory_id,
+          (allocByInventory.get(a.inventory_id) ?? 0) + deduct,
+        )
+      }
+    }
+
+    for (const [inventoryId, deductQty] of allocByInventory) {
+      const { data: invRaw, error: invSelectErr } = await supabase
+        .from('inventory')
+        .select('on_hand_qty, allocated_qty')
+        .eq('id', inventoryId)
+        .single()
+
+      if (invSelectErr) throw new Error(`在庫取得エラー: ${invSelectErr.message}`)
+
+      type InvRow = { on_hand_qty: number; allocated_qty: number }
+      const inv = invRaw as unknown as InvRow
+
+      const { error: invUpdateErr } = await dml('inventory')
+        .update({
+          on_hand_qty:   Math.max(0, (inv.on_hand_qty   ?? 0) - deductQty),
+          allocated_qty: Math.max(0, (inv.allocated_qty ?? 0) - deductQty),
+        })
+        .eq('id', inventoryId)
+
+      if (invUpdateErr) throw new Error(`在庫減算エラー: ${invUpdateErr.message}`)
+    }
+
+    // ── Step 3: 全明細を completed に ────────────────────────────
+    const { error: linesUpdateErr } = await dml('shipping_lines')
+      .update({ status: 'completed' })
+      .eq('header_id', headerId)
+
+    if (linesUpdateErr) throw new Error(`明細ステータス更新エラー: ${linesUpdateErr.message}`)
+
+    // ── Step 4: ヘッダーを shipped に ────────────────────────────
+    const { error: headerErr } = await dml('shipping_headers')
+      .update({ status: 'shipped' })
       .eq('id', headerId)
 
     if (headerErr) throw new Error(`ヘッダー更新エラー: ${headerErr.message}`)
