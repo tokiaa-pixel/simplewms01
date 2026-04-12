@@ -37,6 +37,7 @@ export interface InventoryItem {
   availableQty: number
   unit: string
   locationCode: string
+  locationId?: string   // DB の location_id（在庫移動フィルタ用）
   status: InventoryStatus
   minStock: number
   maxStock: number

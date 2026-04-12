@@ -1,10 +1,17 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
-import { Package, Loader2, AlertCircle } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Package, Loader2, AlertCircle, ArrowLeftRight, SlidersHorizontal, Tag } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
-import { fetchInventory } from '@/lib/supabase/queries/inventory'
+import {
+  fetchInventory,
+  fetchLocationOptions,
+  moveInventory,
+  adjustInventory,
+  changeInventoryStatus,
+  type LocationOption,
+} from '@/lib/supabase/queries/inventory'
 import { useTranslation } from '@/lib/i18n'
 import {
   type InventoryItem,
@@ -177,6 +184,443 @@ function InventoryDetailModal({
   )
 }
 
+// ─── 在庫操作モーダル共通 ──────────────────────────────────────
+
+interface OperationModalProps {
+  item:      InventoryItem
+  onSuccess: () => void
+  onClose:   () => void
+}
+
+/** 操作モーダル内で対象在庫の情報を表示する共通カード */
+function InventoryInfoCard({ item }: { item: InventoryItem }) {
+  return (
+    <div className="bg-slate-50 rounded-lg px-4 py-3 text-xs space-y-1.5 border border-slate-200">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-blue-600 font-medium">{item.productCode}</span>
+        <StatusBadge status={item.status} />
+      </div>
+      <p className="font-medium text-slate-800 text-sm">{item.productName}</p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-500 pt-0.5">
+        <span>場所: <span className="font-mono text-slate-700">{item.locationCode}</span></span>
+        {item.receivedDate && (
+          <span>入庫日: <span className="tabular-nums">{item.receivedDate}</span></span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5 border-t border-slate-200">
+        <span className="text-slate-600">総数: <strong className="text-slate-800 tabular-nums">{item.onHandQty.toLocaleString()}</strong></span>
+        {item.allocatedQty > 0 && (
+          <span className="text-amber-600">引当済: <strong className="tabular-nums">{item.allocatedQty.toLocaleString()}</strong></span>
+        )}
+        <span className="text-teal-600">引当可能: <strong className="tabular-nums">{item.availableQty.toLocaleString()}</strong></span>
+        <span className="text-slate-400">{item.unit}</span>
+      </div>
+    </div>
+  )
+}
+
+// ─── 在庫移動モーダル ──────────────────────────────────────────
+
+function MoveInventoryModal({ item, onSuccess, onClose }: OperationModalProps) {
+  const [locations,   setLocations]   = useState<LocationOption[]>([])
+  const [locLoading,  setLocLoading]  = useState(true)
+  const [destLocId,   setDestLocId]   = useState('')
+  const [moveQtyStr,  setMoveQtyStr]  = useState('')
+  const [loading,     setLoading]     = useState(false)
+  const [error,       setError]       = useState('')
+
+  useEffect(() => {
+    fetchLocationOptions().then(({ data }) => {
+      setLocations(data)
+      setLocLoading(false)
+    })
+  }, [])
+
+  // 移動元ロケーションを除外
+  const destOptions = locations.filter((l) => l.id !== item.locationId)
+
+  const moveQty    = parseInt(moveQtyStr) || 0
+  const isOverflow = moveQty > item.availableQty
+  const canSubmit  = destLocId && moveQty > 0 && !isOverflow && !loading
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return
+    setLoading(true)
+    setError('')
+    const { error: err } = await moveInventory({
+      inventoryId:           item.id,
+      destinationLocationId: destLocId,
+      moveQty,
+    })
+    setLoading(false)
+    if (err) { setError(err); return }
+    onSuccess()
+  }
+
+  return (
+    <Modal title="在庫移動" onClose={onClose} size="md">
+      <div className="space-y-4">
+        <InventoryInfoCard item={item} />
+
+        <div className="space-y-3">
+          {/* 移動先 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              移動先ロケーション <span className="text-red-500">*</span>
+            </label>
+            {locLoading ? (
+              <p className="text-xs text-slate-400 flex items-center gap-1">
+                <Loader2 size={11} className="animate-spin" /> 読み込み中...
+              </p>
+            ) : destOptions.length === 0 ? (
+              <p className="text-xs text-slate-400">移動可能なロケーションがありません</p>
+            ) : (
+              <select
+                value={destLocId}
+                onChange={(e) => setDestLocId(e.target.value)}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-teal"
+              >
+                <option value="">ロケーションを選択...</option>
+                {destOptions.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.code}{l.name ? `　${l.name}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* 移動数量 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              移動数量 <span className="text-red-500">*</span>
+              <span className="ml-1 font-normal text-slate-400">
+                （最大 {item.availableQty.toLocaleString()} {item.unit}）
+              </span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number" min="1" max={item.availableQty}
+                value={moveQtyStr}
+                onChange={(e) => setMoveQtyStr(e.target.value)}
+                placeholder="0"
+                className={`w-28 border rounded-md px-3 py-2 text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal ${
+                  isOverflow ? 'border-red-400 bg-red-50' : 'border-slate-300'
+                }`}
+              />
+              <span className="text-xs text-slate-400">{item.unit}</span>
+            </div>
+            {isOverflow && (
+              <p className="text-xs text-red-500 mt-0.5">
+                引当可能数（{item.availableQty}）を超えています
+              </p>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <AlertCircle size={11} /> {error}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+            キャンセル
+          </button>
+          <button onClick={handleSubmit} disabled={!canSubmit}
+            className="px-4 py-2 text-sm bg-brand-navy text-white rounded-md hover:bg-brand-navy-mid disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 font-medium">
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <ArrowLeftRight size={13} />}
+            移動を確定
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── 在庫数量調整モーダル ──────────────────────────────────────
+
+const ADJUST_REASONS = ['棚卸差異', '破損', '紛失', '誤登録修正', 'その他'] as const
+type AdjustReason = (typeof ADJUST_REASONS)[number]
+type AdjustType   = 'increase' | 'decrease' | 'set'
+
+const ADJUST_TYPE_CONFIG: { type: AdjustType; label: string; color: string }[] = [
+  { type: 'increase', label: '増加', color: 'text-green-600' },
+  { type: 'decrease', label: '減少', color: 'text-red-600'   },
+  { type: 'set',      label: '実棚で上書き', color: 'text-blue-600' },
+]
+
+function AdjustInventoryModal({ item, onSuccess, onClose }: OperationModalProps) {
+  const [adjustType, setAdjustType] = useState<AdjustType>('increase')
+  const [qtyStr,     setQtyStr]     = useState('')
+  const [reason,     setReason]     = useState<AdjustReason>('棚卸差異')
+  const [loading,    setLoading]    = useState(false)
+  const [error,      setError]      = useState('')
+
+  const qty = parseInt(qtyStr) || 0
+
+  const newQty =
+    adjustType === 'increase' ? item.onHandQty + qty :
+    adjustType === 'decrease' ? item.onHandQty - qty :
+    qty  // 'set'
+
+  const isNegative       = newQty < 0
+  const isUnderAllocated = newQty < item.allocatedQty
+  const hasError         = isNegative || isUnderAllocated
+  const canSubmit        = qtyStr !== '' && qty >= 0 && !hasError && !loading
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return
+    setLoading(true)
+    setError('')
+    const { error: err } = await adjustInventory({
+      inventoryId: item.id,
+      adjustType,
+      qty,
+      reason,
+    })
+    setLoading(false)
+    if (err) { setError(err); return }
+    onSuccess()
+  }
+
+  return (
+    <Modal title="在庫数量調整" onClose={onClose} size="md">
+      <div className="space-y-4">
+        <InventoryInfoCard item={item} />
+
+        <div className="space-y-3">
+          {/* 調整方式 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
+              調整方式 <span className="text-red-500">*</span>
+            </label>
+            <div className="flex flex-wrap gap-4">
+              {ADJUST_TYPE_CONFIG.map(({ type, label, color }) => (
+                <label key={type}
+                  className={`flex items-center gap-1.5 text-sm cursor-pointer ${
+                    adjustType === type ? `${color} font-medium` : 'text-slate-500'
+                  }`}>
+                  <input type="radio" name="adjustType" value={type}
+                    checked={adjustType === type}
+                    onChange={() => { setAdjustType(type); setQtyStr('') }}
+                    className="accent-brand-teal"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* 数量 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              {adjustType === 'set' ? '実棚数量' : '調整数量'} <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number" min="0"
+                value={qtyStr}
+                onChange={(e) => setQtyStr(e.target.value)}
+                placeholder="0"
+                className={`w-28 border rounded-md px-3 py-2 text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal ${
+                  hasError ? 'border-red-400 bg-red-50' : 'border-slate-300'
+                }`}
+              />
+              <span className="text-xs text-slate-400">{item.unit}</span>
+              {qtyStr !== '' && (
+                <span className={`text-xs font-medium tabular-nums ${hasError ? 'text-red-600' : 'text-slate-600'}`}>
+                  → {newQty.toLocaleString()} {item.unit}
+                </span>
+              )}
+            </div>
+            {isNegative && (
+              <p className="text-xs text-red-500 mt-0.5">在庫数が負数になります</p>
+            )}
+            {isUnderAllocated && !isNegative && (
+              <p className="text-xs text-red-500 mt-0.5">
+                引当済み数量（{item.allocatedQty}）を下回ります。引当を解除してから調整してください。
+              </p>
+            )}
+          </div>
+
+          {/* 調整理由 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              調整理由 <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={reason}
+              onChange={(e) => setReason(e.target.value as AdjustReason)}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-teal"
+            >
+              {ADJUST_REASONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <AlertCircle size={11} /> {error}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+            キャンセル
+          </button>
+          <button onClick={handleSubmit} disabled={!canSubmit}
+            className="px-4 py-2 text-sm bg-amber-500 text-white rounded-md hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 font-medium">
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <SlidersHorizontal size={13} />}
+            調整を確定
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── 在庫ステータス変更モーダル ────────────────────────────────
+
+const STATUS_LABELS: Record<InventoryStatus, string> = {
+  available: '通常',
+  hold:      '保留',
+  damaged:   '破損',
+}
+
+function ChangeStatusModal({ item, onSuccess, onClose }: OperationModalProps) {
+  const targetStatuses = (Object.keys(INVENTORY_STATUS_CONFIG) as InventoryStatus[])
+    .filter((s) => s !== item.status)
+
+  const [newStatus, setNewStatus] = useState<InventoryStatus>(targetStatuses[0] ?? 'available')
+  const [qtyStr,    setQtyStr]    = useState('')
+  const [loading,   setLoading]   = useState(false)
+  const [error,     setError]     = useState('')
+
+  const qty        = parseInt(qtyStr) || 0
+  const isOverflow = qty > item.availableQty
+  const canSubmit  = qtyStr !== '' && qty > 0 && !isOverflow && !loading
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return
+    setLoading(true)
+    setError('')
+    const { error: err } = await changeInventoryStatus({
+      inventoryId: item.id,
+      newStatus,
+      changeQty: qty,
+    })
+    setLoading(false)
+    if (err) { setError(err); return }
+    onSuccess()
+  }
+
+  return (
+    <Modal title="在庫ステータス変更" onClose={onClose} size="md">
+      <div className="space-y-4">
+        <InventoryInfoCard item={item} />
+
+        <div className="space-y-3">
+          {/* 変更先ステータス */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
+              変更先ステータス <span className="text-red-500">*</span>
+            </label>
+            <div className="flex flex-wrap gap-4">
+              {targetStatuses.map((s) => {
+                const cfg = INVENTORY_STATUS_CONFIG[s]
+                return (
+                  <label key={s}
+                    className={`flex items-center gap-1.5 text-sm cursor-pointer font-medium`}>
+                    <input type="radio" name="newStatus" value={s}
+                      checked={newStatus === s}
+                      onChange={() => setNewStatus(s)}
+                      className="accent-brand-teal"
+                    />
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${cfg.badgeClass}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
+                      {STATUS_LABELS[s]}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* 変更数量 */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              変更数量 <span className="text-red-500">*</span>
+              <span className="ml-1 font-normal text-slate-400">
+                （最大 {item.availableQty.toLocaleString()} {item.unit}）
+              </span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number" min="1" max={item.availableQty}
+                value={qtyStr}
+                onChange={(e) => setQtyStr(e.target.value)}
+                placeholder="0"
+                className={`w-28 border rounded-md px-3 py-2 text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-teal ${
+                  isOverflow ? 'border-red-400 bg-red-50' : 'border-slate-300'
+                }`}
+              />
+              <span className="text-xs text-slate-400">{item.unit}</span>
+            </div>
+            {isOverflow && (
+              <p className="text-xs text-red-500 mt-0.5">
+                引当可能数（{item.availableQty}）を超えています
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* 変更後プレビュー */}
+        {qtyStr !== '' && qty > 0 && !isOverflow && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs">
+            <p className="font-medium text-blue-700 mb-1.5">変更後のイメージ</p>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-blue-600">
+              <span>
+                {STATUS_LABELS[item.status]} (現在):&nbsp;
+                <strong className="tabular-nums">{item.onHandQty}</strong>
+                &nbsp;→&nbsp;
+                <strong className="tabular-nums">{item.onHandQty - qty}</strong>
+              </span>
+              <span>
+                {STATUS_LABELS[newStatus]} (+):&nbsp;
+                <strong className="tabular-nums">+{qty}</strong>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <AlertCircle size={11} /> {error}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+            キャンセル
+          </button>
+          <button onClick={handleSubmit} disabled={!canSubmit}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 font-medium">
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />}
+            変更を確定
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── サマリカウント ────────────────────────────────────────────
 
 function SummaryBar({ items }: { items: InventoryItem[] }) {
@@ -220,6 +664,22 @@ export default function InventoryPage() {
   const [search, setSearch]             = useState('')
   const [statusFilter, setStatusFilter] = useState<InventoryStatus | 'all'>('all')
   const [selected, setSelected]         = useState<InventoryItem | null>(null)
+
+  const [actionItem, setActionItem]   = useState<InventoryItem | null>(null)
+  const [actionType, setActionType]   = useState<'move' | 'adjust' | 'status' | null>(null)
+
+  const handleOperationSuccess = useCallback(() => {
+    setActionItem(null)
+    setActionType(null)
+    fetchInventory().then(({ data, error }) => {
+      if (!error) setInventoryData(data)
+    })
+  }, [])
+
+  const handleOperationClose = useCallback(() => {
+    setActionItem(null)
+    setActionType(null)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -380,6 +840,27 @@ export default function InventoryPage() {
                     )}
                   </div>
                 </div>
+                {/* モバイル操作ボタン */}
+                <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => { setActionItem(item); setActionType('move') }}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-slate-200 text-blue-600 hover:bg-blue-50 transition-colors"
+                  >
+                    <ArrowLeftRight size={11} /> 移動
+                  </button>
+                  <button
+                    onClick={() => { setActionItem(item); setActionType('adjust') }}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-slate-200 text-amber-600 hover:bg-amber-50 transition-colors"
+                  >
+                    <SlidersHorizontal size={11} /> 調整
+                  </button>
+                  <button
+                    onClick={() => { setActionItem(item); setActionType('status') }}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-slate-200 text-purple-600 hover:bg-purple-50 transition-colors"
+                  >
+                    <Tag size={11} /> ステータス
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -402,12 +883,13 @@ export default function InventoryPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colStatus')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colReceivedDate')}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colUpdated')}</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 whitespace-nowrap">{t('colActions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-16 text-center">
+                  <td colSpan={12} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <Package size={28} />
                       <p className="text-sm">{t('empty')}</p>
@@ -464,6 +946,31 @@ export default function InventoryPage() {
                       {item.receivedDate ?? <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{item.updatedAt}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          title="在庫移動"
+                          onClick={(e) => { e.stopPropagation(); setActionItem(item); setActionType('move') }}
+                          className="p-1.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
+                        >
+                          <ArrowLeftRight size={14} />
+                        </button>
+                        <button
+                          title="数量調整"
+                          onClick={(e) => { e.stopPropagation(); setActionItem(item); setActionType('adjust') }}
+                          className="p-1.5 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors"
+                        >
+                          <SlidersHorizontal size={14} />
+                        </button>
+                        <button
+                          title="ステータス変更"
+                          onClick={(e) => { e.stopPropagation(); setActionItem(item); setActionType('status') }}
+                          className="p-1.5 rounded hover:bg-purple-50 text-slate-400 hover:text-purple-600 transition-colors"
+                        >
+                          <Tag size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -474,6 +981,16 @@ export default function InventoryPage() {
 
       {selected && (
         <InventoryDetailModal item={selected} onClose={() => setSelected(null)} />
+      )}
+
+      {actionItem && actionType === 'move' && (
+        <MoveInventoryModal item={actionItem} onSuccess={handleOperationSuccess} onClose={handleOperationClose} />
+      )}
+      {actionItem && actionType === 'adjust' && (
+        <AdjustInventoryModal item={actionItem} onSuccess={handleOperationSuccess} onClose={handleOperationClose} />
+      )}
+      {actionItem && actionType === 'status' && (
+        <ChangeStatusModal item={actionItem} onSuccess={handleOperationSuccess} onClose={handleOperationClose} />
       )}
     </div>
   )

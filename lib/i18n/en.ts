@@ -208,6 +208,7 @@ export const en: Translations = {
     filterAll:           'All',
     resetFilter:         'Reset Filter',
     empty:               'No inventory data found',
+    colActions:          'Actions',
   },
 
   shipping: {
