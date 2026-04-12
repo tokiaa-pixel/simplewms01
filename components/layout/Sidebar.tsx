@@ -32,10 +32,11 @@ function isActive(pathname: string, href: string): boolean {
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { t } = useTranslation('nav')
-  const { th } = { th: useTranslation('header').t }
+  const { t: th } = useTranslation('header')
   const {
     currentTenant, currentWarehouse,
     availableTenants, availableWarehouses,
+    isLoading,
     setTenant, setWarehouse,
   } = useTenant()
 
@@ -180,15 +181,29 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        {/* ─── 荷主・倉庫切替 ──────────────────────────────── */}
-        {availableTenants.length > 0 && (
-          <div
-            className="px-3 py-3 flex-shrink-0 space-y-2"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            {/* 荷主セレクト */}
-            <div className="flex items-center gap-2">
-              <Building2 size={12} className="flex-shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+        {/* ─── 荷主・倉庫切替（常時表示） ─────────────────── */}
+        <div
+          className="px-3 py-3 flex-shrink-0 space-y-2"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+        >
+          {/* 荷主セレクト */}
+          <div className="flex items-center gap-2">
+            <Building2 size={12} className="flex-shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+            {isLoading ? (
+              <div
+                className="flex-1 text-[11px] rounded px-2 py-1"
+                style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                {th('tenantPlaceholder')}
+              </div>
+            ) : availableTenants.length === 0 ? (
+              <div
+                className="flex-1 text-[11px] rounded px-2 py-1"
+                style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                — {th('tenant')}未登録 —
+              </div>
+            ) : (
               <select
                 value={currentTenant?.id ?? ''}
                 onChange={(e) => {
@@ -208,11 +223,20 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                   </option>
                 ))}
               </select>
-            </div>
+            )}
+          </div>
 
-            {/* 倉庫セレクト */}
-            <div className="flex items-center gap-2">
-              <Warehouse size={12} className="flex-shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+          {/* 倉庫セレクト */}
+          <div className="flex items-center gap-2">
+            <Warehouse size={12} className="flex-shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+            {isLoading ? (
+              <div
+                className="flex-1 text-[11px] rounded px-2 py-1"
+                style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                {th('warehousePlaceholder')}
+              </div>
+            ) : (
               <select
                 value={currentWarehouse?.id ?? ''}
                 onChange={(e) => {
@@ -239,15 +263,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                   ))
                 )}
               </select>
-            </div>
+            )}
           </div>
-        )}
+        </div>
 
         {/* ─── フッター ─────────────────────────────────────── */}
-        <div
-          className="flex items-center px-5 py-3 flex-shrink-0"
-          style={{ borderTop: availableTenants.length > 0 ? undefined : '1px solid rgba(255,255,255,0.1)' }}
-        >
+        <div className="flex items-center px-5 py-2 flex-shrink-0">
           <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
             v0.1.0
           </span>
