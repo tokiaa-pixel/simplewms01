@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslation } from '@/lib/i18n'
+import { useTenant } from '@/store/TenantContext'
 import {
   LayoutDashboard,
   ClipboardList,
@@ -13,6 +14,8 @@ import {
   Truck,
   Settings,
   Package,
+  Building2,
+  Warehouse,
 } from 'lucide-react'
 
 interface SidebarProps {
@@ -29,6 +32,12 @@ function isActive(pathname: string, href: string): boolean {
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
   const { t } = useTranslation('nav')
+  const { th } = { th: useTranslation('header').t }
+  const {
+    currentTenant, currentWarehouse,
+    availableTenants, availableWarehouses,
+    setTenant, setWarehouse,
+  } = useTenant()
 
   // ルート変遷時にモバイルメニューを閉じる
   useEffect(() => {
@@ -171,10 +180,73 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
         </nav>
 
+        {/* ─── 荷主・倉庫切替 ──────────────────────────────── */}
+        {availableTenants.length > 0 && (
+          <div
+            className="px-3 py-3 flex-shrink-0 space-y-2"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            {/* 荷主セレクト */}
+            <div className="flex items-center gap-2">
+              <Building2 size={12} className="flex-shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+              <select
+                value={currentTenant?.id ?? ''}
+                onChange={(e) => {
+                  const found = availableTenants.find((t) => t.id === e.target.value)
+                  if (found) setTenant(found)
+                }}
+                className="flex-1 text-[11px] rounded px-2 py-1 focus:outline-none focus:ring-1 min-w-0 truncate"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.08)',
+                  color: 'rgba(255,255,255,0.85)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                }}
+              >
+                {availableTenants.map((t) => (
+                  <option key={t.id} value={t.id} style={{ backgroundColor: '#002B5C', color: '#fff' }}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 倉庫セレクト */}
+            <div className="flex items-center gap-2">
+              <Warehouse size={12} className="flex-shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+              <select
+                value={currentWarehouse?.id ?? ''}
+                onChange={(e) => {
+                  const found = availableWarehouses.find((w) => w.id === e.target.value)
+                  if (found) setWarehouse(found)
+                }}
+                disabled={availableWarehouses.length === 0}
+                className="flex-1 text-[11px] rounded px-2 py-1 focus:outline-none focus:ring-1 min-w-0 truncate disabled:opacity-40"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.08)',
+                  color: 'rgba(255,255,255,0.85)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                }}
+              >
+                {availableWarehouses.length === 0 ? (
+                  <option value="" style={{ backgroundColor: '#002B5C', color: '#fff' }}>
+                    {th('warehousePlaceholder')}
+                  </option>
+                ) : (
+                  availableWarehouses.map((w) => (
+                    <option key={w.id} value={w.id} style={{ backgroundColor: '#002B5C', color: '#fff' }}>
+                      {w.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+        )}
+
         {/* ─── フッター ─────────────────────────────────────── */}
         <div
           className="flex items-center px-5 py-3 flex-shrink-0"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+          style={{ borderTop: availableTenants.length > 0 ? undefined : '1px solid rgba(255,255,255,0.1)' }}
         >
           <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
             v0.1.0

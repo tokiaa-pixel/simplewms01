@@ -51,7 +51,7 @@ export const ja: Translations = {
     warehouse:            '倉庫',
     warehousePlaceholder: '倉庫を選択...',
     noScopeTitle:         '荷主・倉庫を選択してください',
-    noScopeDesc:          '操作を開始するには、画面上部から荷主と倉庫を選択してください。',
+    noScopeDesc:          '操作を開始するには、左のサイドバー下部から荷主と倉庫を選択してください。',
   },
 
   login: {

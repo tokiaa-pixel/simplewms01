@@ -51,7 +51,7 @@ export const en: Translations = {
     warehouse:            'Warehouse',
     warehousePlaceholder: 'Select warehouse...',
     noScopeTitle:         'Select a client and warehouse',
-    noScopeDesc:          'Please select a client and warehouse from the header to begin.',
+    noScopeDesc:          'Please select a client and warehouse from the bottom of the left sidebar to begin.',
   },
 
   login: {
