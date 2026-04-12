@@ -1,8 +1,13 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { PackageCheck, CheckCircle, Loader2, AlertCircle, ChevronRight } from 'lucide-react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { PackageCheck, CheckCircle, Loader2, ChevronRight } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
+import SearchInput from '@/components/ui/SearchInput'
+import StatusBadge from '@/components/ui/StatusBadge'
+import PageShell from '@/components/ui/PageShell'
+import EmptyState from '@/components/ui/EmptyState'
 import { useTranslation } from '@/lib/i18n'
 import {
   type ArrivalStatus,
@@ -43,20 +48,19 @@ function calcGroupProgress(lines: ArrivalLineItem[]) {
 }
 
 // =============================================================
-// ステータスバッジ
+// ステータスバッジ（StatusBadge の入庫専用アダプタ）
 // =============================================================
 
-const FALLBACK_ARRIVAL_CFG = {
-  badgeClass: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
-}
+const FALLBACK_ARRIVAL_CFG = { badgeClass: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' }
 
 function ArrivalStatusBadge({ status }: { status: ArrivalStatus }) {
   const { t } = useTranslation('status')
   const cfg = ARRIVAL_STATUS_CONFIG[status] ?? FALLBACK_ARRIVAL_CFG
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}>
-      {t(`arrival_${status}` as Parameters<typeof t>[0])}
-    </span>
+    <StatusBadge
+      label={t(`arrival_${status}` as Parameters<typeof t>[0])}
+      badgeClass={cfg.badgeClass}
+    />
   )
 }
 
@@ -487,18 +491,50 @@ function ReceivingGroupModal({
 // メインページ
 // =============================================================
 
+// receiving の有効な statusFilter 値（active は pending + partial の複合フィルタ）
+const RECEIVING_FILTER_VALUES = ['all', 'active', 'pending', 'partial', 'completed'] as const
+type ReceivingFilterValue = typeof RECEIVING_FILTER_VALUES[number]
+
 export default function ReceivingPage() {
   const { t }      = useTranslation('receiving')
   const { t: tc }  = useTranslation('common')
   const { t: ts }  = useTranslation('status')
   const { scope }  = useTenant()
 
+  // ── URL params ─────────────────────────────────────────────
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
   const [groups,       setGroups]       = useState<ArrivalGroup[]>([])
   const [locations,    setLocations]    = useState<LocationOption[]>([])
   const [loading,      setLoading]      = useState(true)
   const [fetchError,   setFetchError]   = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'all' | 'active'>('active')
+  // URL params から初期値を読む。'active' がデフォルト（省略時も 'active' に戻す）
+  const [statusFilter, setStatusFilter] = useState<ReceivingFilterValue>(() => {
+    const raw = searchParams.get('status')
+    return (RECEIVING_FILTER_VALUES as readonly string[]).includes(raw ?? '') ? raw as ReceivingFilterValue : 'active'
+  })
+  const [search,       setSearch]       = useState(() => searchParams.get('q') ?? '')
   const [selected,     setSelected]     = useState<ArrivalGroup | null>(null)
+
+  // ── URL 更新ヘルパー（history を積まない replace）──────────
+  const pushParams = useCallback((q: string, status: ReceivingFilterValue) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (status !== 'active') p.set('status', status)   // 'active' はデフォルトなので省略
+    const qs = p.toString()
+    router.replace(`/receiving${qs ? `?${qs}` : ''}`)
+  }, [router])
+
+  const handleStatusChange = useCallback((val: ReceivingFilterValue) => {
+    setStatusFilter(val)
+    pushParams(search, val)
+  }, [search, pushParams])
+
+  const handleSearchChange = useCallback((val: string) => {
+    setSearch(val)
+    pushParams(val, statusFilter)
+  }, [statusFilter, pushParams])
 
   // ── データ取得 ──────────────────────────────────────────────
   const loadGroups = useCallback(async () => {
@@ -525,21 +561,27 @@ export default function ReceivingPage() {
   }, [])
 
   // ── フィルタ ─────────────────────────────────────────────
-  const statusFilterOptions = [
-    { value: 'all'       as const, label: t('filterAll') },
-    { value: 'active'    as const, label: t('filterActive') },
-    { value: 'pending'   as const, label: ts('arrival_pending') },
-    { value: 'partial'   as const, label: ts('arrival_partial') },
-    { value: 'completed' as const, label: ts('arrival_completed') },
+  const statusFilterOptions: { value: ReceivingFilterValue; label: string }[] = [
+    { value: 'all',       label: t('filterAll') },
+    { value: 'active',    label: t('filterActive') },
+    { value: 'pending',   label: ts('arrival_pending') },
+    { value: 'partial',   label: ts('arrival_partial') },
+    { value: 'completed', label: ts('arrival_completed') },
   ]
 
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
     return groups.filter((g) => {
+      const matchSearch =
+        !q ||
+        g.arrivalNo.toLowerCase().includes(q) ||
+        g.supplierName.toLowerCase().includes(q)
+      if (!matchSearch) return false
       if (statusFilter === 'all')    return true
       if (statusFilter === 'active') return g.status === 'pending' || g.status === 'partial'
       return g.status === statusFilter
     })
-  }, [groups, statusFilter])
+  }, [groups, statusFilter, search])
 
   const counts = useMemo(() => ({
     pending: groups.filter((g) => g.status === 'pending').length,
@@ -549,46 +591,15 @@ export default function ReceivingPage() {
   // ── スコープ未選択 ───────────────────────────────────────
   if (!scope) return <ScopeRequired />
 
-  // ── ローディング ─────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="max-w-screen-xl space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-slate-200 flex items-center justify-center py-24 gap-3 text-slate-400">
-          <Loader2 size={20} className="animate-spin" />
-          <span className="text-sm">{tc('loading')}</span>
-        </div>
-      </div>
-    )
-  }
-
-  // ── フェッチエラー ────────────────────────────────────────
-  if (fetchError) {
-    return (
-      <div className="max-w-screen-xl space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-red-200 flex items-start gap-3 px-6 py-8 text-red-600">
-          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">データの取得に失敗しました</p>
-            <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
-            <button onClick={loadGroups} className="mt-3 text-xs text-red-600 underline hover:no-underline">
-              再試行
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // ── メイン描画 ────────────────────────────────────────────
   return (
+  <PageShell
+    loading={loading}
+    error={fetchError}
+    onRetry={loadGroups}
+    title={t('title')}
+    subtitle={t('subtitle')}
+  >
     <div className="max-w-screen-xl space-y-4">
 
       {/* ページヘッダー */}
@@ -621,10 +632,15 @@ export default function ReceivingPage() {
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
 
         {/* フィルタバー */}
-        <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3">
+        <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+          <SearchInput
+            value={search}
+            onChange={handleSearchChange}
+            placeholder={t('searchPlaceholder')}
+          />
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            onChange={(e) => handleStatusChange(e.target.value as ReceivingFilterValue)}
             className="px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white text-slate-700"
           >
             {statusFilterOptions.map((opt) => (
@@ -639,9 +655,8 @@ export default function ReceivingPage() {
         {/* モバイル：カード表示 */}
         <div className="sm:hidden divide-y divide-slate-100">
           {filtered.length === 0 ? (
-            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
-              <PackageCheck size={28} />
-              <p className="text-sm">{t('empty')}</p>
+            <div className="py-12">
+              <EmptyState icon={<PackageCheck size={28} />} message={t('empty')} />
             </div>
           ) : filtered.map((group) => {
             const progress    = calcGroupProgress(group.lines)
@@ -696,10 +711,7 @@ export default function ReceivingPage() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <PackageCheck size={28} />
-                      <p className="text-sm">{t('empty')}</p>
-                    </div>
+                    <EmptyState icon={<PackageCheck size={28} />} message={t('empty')} />
                   </td>
                 </tr>
               ) : filtered.map((group) => {
@@ -755,5 +767,6 @@ export default function ReceivingPage() {
       )}
 
     </div>
+  </PageShell>
   )
 }

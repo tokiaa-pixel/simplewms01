@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ClipboardList,
   PackageMinus,
-  Search as SearchIcon,
   CheckCircle,
   Truck,
   ScanLine,
@@ -14,6 +14,9 @@ import {
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
+import StatusBadge from '@/components/ui/StatusBadge'
+import PageShell from '@/components/ui/PageShell'
+import EmptyState from '@/components/ui/EmptyState'
 import {
   type ShippingStatus,
   SHIPPING_STATUS_CONFIG,
@@ -23,6 +26,7 @@ import { useTranslation } from '@/lib/i18n'
 import {
   type ShippingOrderSummary,
   type ShippingLineItem,
+  type ShippingLineAllocation,
   fetchShippingOrders,
   fetchShippingOrderLines,
   startPickingShipping,
@@ -50,10 +54,11 @@ function ShippingStatusBadge({ status }: { status: ShippingStatus }) {
   const { t } = useTranslation('status')
   const cfg = SHIPPING_STATUS_CONFIG[status]
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
-      {t(`shipping_${status}` as Parameters<typeof t>[0])}
-    </span>
+    <StatusBadge
+      label={t(`shipping_${status}` as Parameters<typeof t>[0])}
+      badgeClass={cfg.badgeClass}
+      dotClass={cfg.dotClass}
+    />
   )
 }
 
@@ -76,9 +81,31 @@ function PickingModal({
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
 
-  const sortedItems = [...order.items].sort((a, b) =>
-    a.locationCode.localeCompare(b.locationCode)
-  )
+  // 引当行を棚番順に1行ずつ展開（ピッキングルート順）
+  // allocations がある場合は棚ごとに1行、ない場合は item をそのまま1行にフォールバック
+  type PickRow = { key: string; locationCode: string; productCode: string; productName: string; unit: string; qty: number }
+  const pickingRows: PickRow[] = order.items
+    .flatMap((item): PickRow[] => {
+      if (item.allocations.length > 0) {
+        return item.allocations.map((alloc: ShippingLineAllocation) => ({
+          key:         `${item.id}-${alloc.locationCode}`,
+          locationCode: alloc.locationCode,
+          productCode:  item.productCode,
+          productName:  item.productName,
+          unit:         item.unit,
+          qty:          alloc.allocatedQty,
+        }))
+      }
+      return [{
+        key:         item.id,
+        locationCode: item.locationCode || '—',
+        productCode:  item.productCode,
+        productName:  item.productName,
+        unit:         item.unit,
+        qty:          item.orderedQuantity,
+      }]
+    })
+    .sort((a, b) => a.locationCode.localeCompare(b.locationCode))
 
   const handleStart = async () => {
     setLoading(true)
@@ -144,18 +171,18 @@ function PickingModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sortedItems.map((item) => (
-                  <tr key={item.id}>
+                {pickingRows.map((row) => (
+                  <tr key={row.key}>
                     <td className="px-4 py-3">
                       <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                        {item.locationCode || '—'}
+                        {row.locationCode}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-blue-600">{item.productCode}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.productName}</td>
+                    <td className="px-4 py-3 font-mono text-blue-600">{row.productCode}</td>
+                    <td className="px-4 py-3 text-slate-700">{row.productName}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-semibold">
-                      {item.orderedQuantity}
-                      <span className="text-slate-400 font-normal ml-1">{item.unit}</span>
+                      {row.qty}
+                      <span className="text-slate-400 font-normal ml-1">{row.unit}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <input type="checkbox" className="w-4 h-4 accent-blue-600" />
@@ -544,23 +571,52 @@ function getModalType(status: ShippingStatus): 'picking' | 'inspection' | 'confi
 // メインページ
 // =============================================================
 
+// 出庫の有効な tab 値
+const SHIPPING_TAB_VALUES = ['all', 'pending', 'picking', 'inspected', 'shipped', 'cancelled'] as const
+type ShippingTabValue = typeof SHIPPING_TAB_VALUES[number]
+
 export default function ShippingPage() {
   const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('status')
   const { scope } = useTenant()
 
+  // ── URL params ─────────────────────────────────────────────
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
   // ── データ ───────────────────────────────────────────────────
   const [orders,     setOrders]     = useState<ShippingOrderDetail[]>([])
   const [loading,    setLoading]    = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
 
-  // ── UI 状態 ──────────────────────────────────────────────────
-  const [activeTab,       setActiveTab]       = useState<'all' | ShippingStatus>('all')
-  const [search,          setSearch]          = useState('')
+  // ── UI 状態（URL params から初期値を読む）───────────────────
+  const [activeTab, setActiveTab] = useState<ShippingTabValue>(() => {
+    const raw = searchParams.get('tab')
+    return (SHIPPING_TAB_VALUES as readonly string[]).includes(raw ?? '') ? raw as ShippingTabValue : 'all'
+  })
+  const [search,          setSearch]          = useState(() => searchParams.get('q') ?? '')
   const [selectedId,      setSelectedId]      = useState<string | null>(null)
   const [modalLoading,    setModalLoading]    = useState(false)
-  const tableRef = useRef<HTMLDivElement>(null)
+
+  // ── URL 更新ヘルパー（history を積まない replace）──────────
+  const pushParams = useCallback((q: string, tab: ShippingTabValue) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (tab !== 'all') p.set('tab', tab)
+    const qs = p.toString()
+    router.replace(`/shipping${qs ? `?${qs}` : ''}`)
+  }, [router])
+
+  const handleTabChange = useCallback((val: ShippingTabValue) => {
+    setActiveTab(val)
+    pushParams(search, val)
+  }, [search, pushParams])
+
+  const handleSearchChange = useCallback((val: string) => {
+    setSearch(val)
+    pushParams(val, activeTab)
+  }, [activeTab, pushParams])
 
   // ── 一覧取得 ─────────────────────────────────────────────────
   const loadOrders = useCallback(async () => {
@@ -640,18 +696,6 @@ export default function ShippingPage() {
     })
   }, [orders, activeTab, search])
 
-  const handleOperationClick = (tab: 'all' | ShippingStatus) => {
-    setActiveTab(tab)
-    setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
-  }
-
-  const summaryItems = [
-    { status: 'pending'   as ShippingStatus, label: t('summaryPending'),   count: counts.pending,   bg: 'bg-slate-50',  border: 'border-slate-200',  countColor: 'text-slate-700'  },
-    { status: 'picking'   as ShippingStatus, label: t('summaryPicking'),   count: counts.picking,   bg: 'bg-blue-50',   border: 'border-blue-200',   countColor: 'text-blue-700'   },
-    { status: 'inspected' as ShippingStatus, label: t('summaryInspected'), count: counts.inspected, bg: 'bg-purple-50', border: 'border-purple-200', countColor: 'text-purple-700' },
-    { status: 'shipped'   as ShippingStatus, label: t('summaryShipped'),   count: counts.shipped,   bg: 'bg-green-50',  border: 'border-green-200',  countColor: 'text-green-700'  },
-  ]
-
   const actionLabels: Record<'picking' | 'inspection' | 'confirm' | 'detail', string> = {
     picking:    t('actionPicking'),
     inspection: t('actionInspection'),
@@ -664,31 +708,8 @@ export default function ShippingPage() {
   // ── スコープ未選択 ───────────────────────────────────────────
   if (!scope) return <ScopeRequired />
 
-  // ── ローディング ─────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="max-w-screen-xl flex items-center justify-center py-24 gap-3 text-slate-400">
-        <Loader2 size={20} className="animate-spin" />
-        <span className="text-sm">{tc('loading')}</span>
-      </div>
-    )
-  }
-
-  if (fetchError) {
-    return (
-      <div className="max-w-screen-xl">
-        <div className="bg-white rounded-lg border border-red-200 flex items-start gap-3 px-6 py-8 text-red-600">
-          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">データの取得に失敗しました</p>
-            <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
+    <PageShell loading={loading} error={fetchError} onRetry={loadOrders}>
     <div className="max-w-screen-xl space-y-5">
       {/* ページヘッダー */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -703,85 +724,43 @@ export default function ShippingPage() {
         </Link>
       </div>
 
-      {/* ステータスサマリバー */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {summaryItems.map((item) => (
-          <button key={item.status} onClick={() => handleOperationClick(item.status)}
-            className={`${item.bg} border ${item.border} rounded-lg px-4 py-3 text-left hover:opacity-80 transition-opacity`}>
-            <p className="text-xs text-slate-500 mb-1">{item.label}</p>
-            <p className={`text-2xl font-bold tabular-nums ${item.countColor}`}>
-              {item.count}<span className="text-sm font-normal ml-1">{tc('countUnit')}</span>
-            </p>
-          </button>
-        ))}
-      </div>
-
-      {/* 操作メニューカード */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <button onClick={() => handleOperationClick('pending')}
-          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-blue-400 hover:shadow-sm transition-all group">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
-              <ScanLine size={18} className="text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-700">{t('menuPickingTitle')}</p>
-              <p className="text-xs text-slate-400">{t('menuPickingSubtitle')}</p>
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-blue-600 tabular-nums">{counts.pending}</span>
-            <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
-          </div>
-          <p className="text-xs text-slate-400 mt-2">{t('menuPickingDesc')}</p>
-        </button>
-
-        <button onClick={() => handleOperationClick('picking')}
-          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-purple-400 hover:shadow-sm transition-all group">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2.5 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors">
-              <SearchIcon size={18} className="text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-700">{t('menuInspectionTitle')}</p>
-              <p className="text-xs text-slate-400">{t('menuInspectionSubtitle')}</p>
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-purple-600 tabular-nums">{counts.picking}</span>
-            <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
-          </div>
-          <p className="text-xs text-slate-400 mt-2">{t('menuInspectionDesc')}</p>
-        </button>
-
-        <button onClick={() => handleOperationClick('inspected')}
-          className="bg-white rounded-lg border border-slate-200 p-5 text-left hover:border-green-400 hover:shadow-sm transition-all group">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2.5 bg-green-50 rounded-lg group-hover:bg-green-100 transition-colors">
-              <Truck size={18} className="text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-700">{t('menuConfirmTitle')}</p>
-              <p className="text-xs text-slate-400">{t('menuConfirmSubtitle')}</p>
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-green-600 tabular-nums">{counts.inspected}</span>
-            <span className="text-xs text-slate-500">{t('waitingUnit')}</span>
-          </div>
-          <p className="text-xs text-slate-400 mt-2">{t('menuConfirmDesc')}</p>
-        </button>
+      {/* ステータスサマリ（コンパクト pills）*/}
+      <div className="flex flex-wrap gap-2">
+        {(([
+          { status: 'pending'   as ShippingStatus, label: t('summaryPending'),   count: counts.pending   },
+          { status: 'picking'   as ShippingStatus, label: t('summaryPicking'),   count: counts.picking   },
+          { status: 'inspected' as ShippingStatus, label: t('summaryInspected'), count: counts.inspected },
+          { status: 'shipped'   as ShippingStatus, label: t('summaryShipped'),   count: counts.shipped   },
+        ]) as { status: ShippingStatus; label: string; count: number }[]).map(({ status, label, count }) => {
+          const cfg = SHIPPING_STATUS_CONFIG[status]
+          return (
+            <button
+              key={status}
+              onClick={() => handleTabChange(status)}
+              disabled={count === 0}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-opacity ${
+                count > 0
+                  ? `${cfg.badgeClass} hover:opacity-75`
+                  : 'bg-slate-50 text-slate-300 cursor-default'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${count > 0 ? cfg.dotClass : 'bg-slate-200'}`} />
+              {label}
+              <span className="tabular-nums font-bold">{count}</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* 出庫指示一覧テーブル */}
-      <div ref={tableRef} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {/* ツールバー */}
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1">
             <ClipboardList size={15} className="text-slate-400" />
             <span className="text-sm font-semibold text-slate-700">{t('listTitle')}</span>
           </div>
-          <SearchInput value={search} onChange={setSearch} placeholder={t('searchPlaceholder')} className="ml-2" />
+          <SearchInput value={search} onChange={handleSearchChange} placeholder={t('searchPlaceholder')} className="ml-2" />
         </div>
 
         {/* タブ */}
@@ -792,7 +771,7 @@ export default function ShippingPage() {
               ? orders.length
               : orders.filter((o) => o.status === tab.value).length
             return (
-              <button key={tab.value} onClick={() => setActiveTab(tab.value)}
+              <button key={tab.value} onClick={() => handleTabChange(tab.value)}
                 className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
                   isActive
                     ? 'border-brand-teal text-brand-teal bg-white'
@@ -813,9 +792,8 @@ export default function ShippingPage() {
         {/* モバイル：カード */}
         <div className="sm:hidden divide-y divide-slate-100">
           {filtered.length === 0 ? (
-            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
-              <Truck size={28} />
-              <p className="text-sm">{t('empty')}</p>
+            <div className="py-12">
+              <EmptyState icon={<Truck size={28} />} message={t('empty')} />
             </div>
           ) : (
             filtered.map((order) => {
@@ -865,10 +843,7 @@ export default function ShippingPage() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <Truck size={28} />
-                      <p className="text-sm">{t('empty')}</p>
-                    </div>
+                    <EmptyState icon={<Truck size={28} />} message={t('empty')} />
                   </td>
                 </tr>
               ) : (
@@ -928,5 +903,6 @@ export default function ShippingPage() {
       {/* ts unused var suppression */}
       <span className="hidden">{ts('shipping_pending')}</span>
     </div>
+    </PageShell>
   )
 }

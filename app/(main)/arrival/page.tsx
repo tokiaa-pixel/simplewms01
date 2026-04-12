@@ -1,9 +1,13 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback, useId } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { Plus, Trash2, ClipboardList, Loader2, AlertCircle } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
+import StatusBadge from '@/components/ui/StatusBadge'
+import PageShell from '@/components/ui/PageShell'
+import EmptyState from '@/components/ui/EmptyState'
 import { useTranslation } from '@/lib/i18n'
 import {
   type ArrivalStatus,
@@ -25,20 +29,19 @@ import ScopeRequired from '@/components/ui/ScopeRequired'
 import { todayIso } from '@/lib/utils'
 
 // =============================================================
-// ステータスバッジ
+// ステータスバッジ（StatusBadge の入荷専用アダプタ）
 // =============================================================
 
-const FALLBACK_ARRIVAL_CFG = {
-  badgeClass: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
-}
+const FALLBACK_ARRIVAL_CFG = { badgeClass: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' }
 
 function ArrivalStatusBadge({ status }: { status: ArrivalStatus }) {
   const { t } = useTranslation('status')
   const cfg = ARRIVAL_STATUS_CONFIG[status] ?? FALLBACK_ARRIVAL_CFG
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}>
-      {t(`arrival_${status}` as Parameters<typeof t>[0])}
-    </span>
+    <StatusBadge
+      label={t(`arrival_${status}` as Parameters<typeof t>[0])}
+      badgeClass={cfg.badgeClass}
+    />
   )
 }
 
@@ -445,10 +448,18 @@ function ArrivalDetailModal({
 // メインページ
 // =============================================================
 
+// arrival の有効な status 値
+const ARRIVAL_FILTER_VALUES = ['all', 'pending', 'partial', 'completed', 'cancelled'] as const
+type ArrivalFilterValue = typeof ARRIVAL_FILTER_VALUES[number]
+
 export default function ArrivalPage() {
   const { t }  = useTranslation('arrival')
   const { t: tc } = useTranslation('common')
   const { scope } = useTenant()
+
+  // ── URL params ─────────────────────────────────────────────
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   const [groups,       setGroups]       = useState<ArrivalGroup[]>([])
   const [suppliers,    setSuppliers]    = useState<SupplierOption[]>([])
@@ -458,8 +469,31 @@ export default function ArrivalPage() {
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [detailGroup,     setDetailGroup]     = useState<ArrivalGroup | null>(null)
-  const [search,          setSearch]          = useState('')
-  const [statusFilter,    setStatusFilter]    = useState<ArrivalStatus | 'all'>('all')
+  // URL params から初期値を読む（不正値はデフォルトにフォールバック）
+  const [search,       setSearch]       = useState(() => searchParams.get('q') ?? '')
+  const [statusFilter, setStatusFilter] = useState<ArrivalFilterValue>(() => {
+    const raw = searchParams.get('status')
+    return (ARRIVAL_FILTER_VALUES as readonly string[]).includes(raw ?? '') ? raw as ArrivalFilterValue : 'all'
+  })
+
+  // ── URL 更新ヘルパー（history を積まない replace）──────────
+  const pushParams = useCallback((q: string, status: ArrivalFilterValue) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (status !== 'all') p.set('status', status)
+    const qs = p.toString()
+    router.replace(`/arrival${qs ? `?${qs}` : ''}`)
+  }, [router])
+
+  const handleSearchChange = useCallback((val: string) => {
+    setSearch(val)
+    pushParams(val, statusFilter)
+  }, [statusFilter, pushParams])
+
+  const handleStatusChange = useCallback((val: ArrivalFilterValue) => {
+    setStatusFilter(val)
+    pushParams(search, val)
+  }, [search, pushParams])
 
   // ── データ取得 ─────────────────────────────────────────────
   const loadAll = useCallback(async () => {
@@ -494,7 +528,7 @@ export default function ArrivalPage() {
     if (!error) setGroups(data)
   }, [scope])
 
-  const statusFilterOptions: { value: ArrivalStatus | 'all'; label: string }[] = [
+  const statusFilterOptions: { value: ArrivalFilterValue; label: string }[] = [
     { value: 'all',       label: t('filterAll') },
     { value: 'pending',   label: t('filterPending') },
     { value: 'partial',   label: t('filterPartial') },
@@ -516,49 +550,15 @@ export default function ArrivalPage() {
 
   if (!scope) return <ScopeRequired />
 
-  // ── ローディング ─────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="max-w-screen-xl space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-slate-200 flex items-center justify-center py-24 gap-3 text-slate-400">
-          <Loader2 size={20} className="animate-spin" />
-          <span className="text-sm">{tc('loading')}</span>
-        </div>
-      </div>
-    )
-  }
-
-  // ── フェッチエラー ────────────────────────────────────────
-  if (fetchError) {
-    return (
-      <div className="max-w-screen-xl space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-red-200 flex items-start gap-3 px-6 py-8 text-red-600">
-          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">データの取得に失敗しました</p>
-            <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
-            <button
-              onClick={loadAll}
-              className="mt-3 text-xs text-red-600 underline hover:no-underline"
-            >
-              再試行
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // ── メイン描画 ────────────────────────────────────────────
   return (
+  <PageShell
+    loading={loading}
+    error={fetchError}
+    onRetry={loadAll}
+    title={t('title')}
+    subtitle={t('subtitle')}
+  >
     <div className="max-w-screen-xl space-y-4">
       {/* ページヘッダー */}
       <div>
@@ -572,13 +572,13 @@ export default function ArrivalPage() {
         <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-3">
           <SearchInput
             value={search}
-            onChange={setSearch}
+            onChange={handleSearchChange}
             placeholder={t('searchPlaceholder')}
           />
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as ArrivalStatus | 'all')}
+            onChange={(e) => handleStatusChange(e.target.value as ArrivalFilterValue)}
             className="px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white text-slate-700"
           >
             {statusFilterOptions.map((opt) => (
@@ -602,9 +602,8 @@ export default function ArrivalPage() {
         {/* モバイル：カード表示 */}
         <div className="sm:hidden divide-y divide-slate-100">
           {filtered.length === 0 ? (
-            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
-              <ClipboardList size={28} />
-              <p className="text-sm">{t('empty')}</p>
+            <div className="py-12">
+              <EmptyState icon={<ClipboardList size={28} />} message={t('empty')} />
             </div>
           ) : (
             filtered.map((group) => (
@@ -644,10 +643,7 @@ export default function ArrivalPage() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <ClipboardList size={28} />
-                      <p className="text-sm">{t('empty')}</p>
-                    </div>
+                    <EmptyState icon={<ClipboardList size={28} />} message={t('empty')} />
                   </td>
                 </tr>
               ) : (
@@ -694,5 +690,6 @@ export default function ArrivalPage() {
         />
       )}
     </div>
+  </PageShell>
   )
 }

@@ -215,6 +215,7 @@ export interface Translations {
     resetFilter: string
     empty: string
     colActions: string
+    pageSizeLabel: string
   }
   shipping: {
     title: string

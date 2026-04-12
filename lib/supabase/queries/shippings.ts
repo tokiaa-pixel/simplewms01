@@ -595,6 +595,12 @@ type ShippingLineDetailRaw = {
   }>
 }
 
+/** 棚別引当明細（PickingModal でのピッキングリスト表示に使用） */
+export type ShippingLineAllocation = {
+  locationCode: string
+  allocatedQty: number
+}
+
 /** 出庫指示明細1行 */
 export type ShippingLineItem = {
   id:             string   // shipping_lines.id
@@ -604,7 +610,8 @@ export type ShippingLineItem = {
   unit:           string
   orderedQuantity: number  // requested_qty
   pickedQuantity:  number  // shipped_qty（検品後に更新）
-  locationCode:    string  // 引当先ロケーション（複数ある場合はカンマ区切り）
+  locationCode:    string  // 引当先ロケーション（複数の場合はカンマ区切り / 後方互換）
+  allocations:     ShippingLineAllocation[]  // 棚別引当明細（棚番順）
 }
 
 // ─── ユーティリティ ───────────────────────────────────────────
@@ -690,14 +697,18 @@ export async function fetchShippingOrderLines(headerId: string): Promise<{
 
   return {
     data: rows.map((r) => {
-      // 引当先ロケーションを集約（複数ある場合はカンマ区切り）
-      const locs = [
-        ...new Set(
-          r.shipping_allocations
-            .map((a) => a.inventory?.locations?.location_code)
-            .filter((v): v is string => !!v)
-        ),
-      ]
+      // 棚別引当明細を構築（棚番順ソート）
+      const allocations: ShippingLineAllocation[] = r.shipping_allocations
+        .filter((a) => a.inventory?.locations?.location_code)
+        .map((a) => ({
+          locationCode: a.inventory!.locations!.location_code,
+          allocatedQty: Number(a.allocated_qty),
+        }))
+        .sort((a, b) => a.locationCode.localeCompare(b.locationCode))
+
+      // 後方互換用のカンマ区切りロケーション文字列
+      const locationCode = [...new Set(allocations.map((a) => a.locationCode))].join(', ')
+
       return {
         id:             r.id,
         lineNo:         r.line_no,
@@ -706,7 +717,8 @@ export async function fetchShippingOrderLines(headerId: string): Promise<{
         unit:           r.products?.unit            ?? '',
         orderedQuantity: Number(r.requested_qty),
         pickedQuantity:  Number(r.shipped_qty),
-        locationCode:    locs.join(', '),
+        locationCode,
+        allocations,
       }
     }),
     error: null,

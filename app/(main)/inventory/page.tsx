@@ -1,9 +1,13 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Package, Loader2, AlertCircle, ArrowLeftRight, SlidersHorizontal, Tag } from 'lucide-react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { Package, Loader2, AlertCircle, ArrowLeftRight, SlidersHorizontal, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
+import StatusBadge from '@/components/ui/StatusBadge'
+import PageShell from '@/components/ui/PageShell'
+import EmptyState from '@/components/ui/EmptyState'
 import {
   fetchInventory,
   fetchLocationOptions,
@@ -21,24 +25,22 @@ import {
   INVENTORY_STATUS_CONFIG,
 } from '@/lib/types'
 
-// ─── ステータスバッジ ──────────────────────────────────────────
+// ─── ステータスバッジ（StatusBadge の在庫専用アダプタ） ────────
 
 const FALLBACK_STATUS_CFG = {
   badgeClass: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
   dotClass:   'bg-slate-400',
 }
 
-function StatusBadge({ status }: { status: InventoryStatus }) {
+function InventoryStatusBadge({ status }: { status: InventoryStatus }) {
   const { t } = useTranslation('status')
   const cfg = INVENTORY_STATUS_CONFIG[status] ?? FALLBACK_STATUS_CFG
-  const labelKey = `inventory_${status}` as Parameters<typeof t>[0]
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${cfg.badgeClass}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
-      {t(labelKey) ?? status}
-    </span>
+    <StatusBadge
+      label={t(`inventory_${status}` as Parameters<typeof t>[0]) ?? status}
+      badgeClass={cfg.badgeClass}
+      dotClass={cfg.dotClass}
+    />
   )
 }
 
@@ -154,7 +156,7 @@ function InventoryDetailModal({
                 </span>
               }
             />
-            <DetailRow label={t('colStatus')}      value={<StatusBadge status={item.status} />} />
+            <DetailRow label={t('colStatus')}      value={<InventoryStatusBadge status={item.status} />} />
             <DetailRow label={t('detailLocation')} value={<span className="font-mono">{item.locationCode}</span>} />
             {item.receivedDate && (
               <DetailRow label={t('detailReceivedDate')} value={
@@ -200,7 +202,7 @@ function InventoryInfoCard({ item }: { item: InventoryItem }) {
     <div className="bg-slate-50 rounded-lg px-4 py-3 text-xs space-y-1.5 border border-slate-200">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-blue-600 font-medium">{item.productCode}</span>
-        <StatusBadge status={item.status} />
+        <InventoryStatusBadge status={item.status} />
       </div>
       <p className="font-medium text-slate-800 text-sm">{item.productName}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-500 pt-0.5">
@@ -656,22 +658,72 @@ function SummaryBar({ items }: { items: InventoryItem[] }) {
 
 // ─── メインページ ─────────────────────────────────────────────
 
+// 在庫の有効な statusFilter 値
+const INVENTORY_FILTER_VALUES = ['all', 'available', 'damaged', 'hold'] as const
+type InventoryFilterValue = typeof INVENTORY_FILTER_VALUES[number]
+
+// ─── ページネーション定数 ─────────────────────────────────────
+
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+type PageSizeOption     = typeof PAGE_SIZE_OPTIONS[number]
+const DEFAULT_PAGE_SIZE: PageSizeOption = 50
+
+/**
+ * ページ番号ウィンドウを生成する。
+ * total <= 7 なら全ページ表示。それ以上は current ±1 の周辺と両端を残し中間を '…' で省略。
+ */
+function getPageWindow(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const pages: (number | '…')[] = [1]
+  if (current > 3)           pages.push('…')
+  for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) pages.push(p)
+  if (current < total - 2)   pages.push('…')
+  pages.push(total)
+  return pages
+}
+
 export default function InventoryPage() {
   const { t } = useTranslation('inventory')
   const { t: ts } = useTranslation('status')
   const { t: tc } = useTranslation('common')
   const { scope } = useTenant()
 
+  // ── URL params ─────────────────────────────────────────────
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
   const [inventoryData, setInventoryData] = useState<InventoryItem[]>([])
   const [loading, setLoading]             = useState(true)
   const [fetchError, setFetchError]       = useState<string | null>(null)
 
-  const [search, setSearch]             = useState('')
-  const [statusFilter, setStatusFilter] = useState<InventoryStatus | 'all'>('all')
+  // URL params から初期値を読む
+  const [search, setSearch]             = useState(() => searchParams.get('q') ?? '')
+  const [statusFilter, setStatusFilter] = useState<InventoryFilterValue>(() => {
+    const raw = searchParams.get('status')
+    return (INVENTORY_FILTER_VALUES as readonly string[]).includes(raw ?? '') ? raw as InventoryFilterValue : 'all'
+  })
+  const [page, setPage]         = useState(() => {
+    const raw = parseInt(searchParams.get('page') ?? '1', 10)
+    return Number.isFinite(raw) && raw >= 1 ? raw : 1
+  })
+  const [pageSize, setPageSize] = useState<PageSizeOption>(() => {
+    const raw = parseInt(searchParams.get('pageSize') ?? String(DEFAULT_PAGE_SIZE), 10)
+    return (PAGE_SIZE_OPTIONS as readonly number[]).includes(raw) ? raw as PageSizeOption : DEFAULT_PAGE_SIZE
+  })
   const [selected, setSelected]         = useState<InventoryItem | null>(null)
 
   const [actionItem, setActionItem]   = useState<InventoryItem | null>(null)
   const [actionType, setActionType]   = useState<'move' | 'adjust' | 'status' | null>(null)
+
+  const loadInventory = useCallback(async () => {
+    if (!scope) { setLoading(false); return }
+    setLoading(true)
+    setFetchError(null)
+    const { data, error } = await fetchInventory(scope)
+    if (error) setFetchError(error)
+    else setInventoryData(data)
+    setLoading(false)
+  }, [scope])
 
   const handleOperationSuccess = useCallback(() => {
     setActionItem(null)
@@ -687,20 +739,53 @@ export default function InventoryPage() {
     setActionType(null)
   }, [])
 
-  useEffect(() => {
-    if (!scope) { setLoading(false); return }
-    let cancelled = false
-    setLoading(true)
-    fetchInventory(scope).then(({ data, error }) => {
-      if (cancelled) return
-      if (error) setFetchError(error)
-      else setInventoryData(data)
-      setLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [scope])
+  useEffect(() => { loadInventory() }, [loadInventory])
 
-  const statusOptions: { value: InventoryStatus | 'all'; label: string }[] = [
+  // ── URL 更新ヘルパー（history を積まない replace）──────────
+  // page=1 / pageSize=DEFAULT は省略してURLを汚さない
+  const pushParams = useCallback((q: string, status: InventoryFilterValue, pg: number, ps: PageSizeOption) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (status !== 'all')       p.set('status',   status)
+    if (pg > 1)                 p.set('page',     String(pg))
+    if (ps !== DEFAULT_PAGE_SIZE) p.set('pageSize', String(ps))
+    const qs = p.toString()
+    router.replace(`/inventory${qs ? `?${qs}` : ''}`)
+  }, [router])
+
+  // filter / search 変更時はページを 1 にリセット
+  const handleSearchChange = useCallback((val: string) => {
+    setSearch(val)
+    setPage(1)
+    pushParams(val, statusFilter, 1, pageSize)
+  }, [statusFilter, pageSize, pushParams])
+
+  const handleStatusChange = useCallback((val: InventoryFilterValue) => {
+    setStatusFilter(val)
+    setPage(1)
+    pushParams(search, val, 1, pageSize)
+  }, [search, pageSize, pushParams])
+
+  // フィルタリセット（EmptyState の action からも呼ばれる）
+  const resetFilter = useCallback(() => {
+    setSearch('')
+    setStatusFilter('all')
+    setPage(1)
+    pushParams('', 'all', 1, pageSize)
+  }, [pageSize, pushParams])
+
+  const handlePageChange = useCallback((pg: number) => {
+    setPage(pg)
+    pushParams(search, statusFilter, pg, pageSize)
+  }, [search, statusFilter, pageSize, pushParams])
+
+  const handlePageSizeChange = useCallback((ps: PageSizeOption) => {
+    setPageSize(ps)
+    setPage(1)
+    pushParams(search, statusFilter, 1, ps)
+  }, [search, statusFilter, pushParams])
+
+  const statusOptions: { value: InventoryFilterValue; label: string }[] = [
     { value: 'all',       label: tc('all') },
     { value: 'available', label: ts('inventory_available') },
     { value: 'damaged',   label: ts('inventory_damaged') },
@@ -721,44 +806,25 @@ export default function InventoryPage() {
     })
   }, [inventoryData, search, statusFilter])
 
+  // ── ページング（filtered を pageSize で切り出す） ──────────
+  const { paged, totalPages, safePage, startIdx, endIdx } = useMemo(() => {
+    const total = Math.max(1, Math.ceil(filtered.length / pageSize))
+    const safe  = Math.min(Math.max(1, page), total)
+    const start = (safe - 1) * pageSize
+    const end   = Math.min(start + pageSize, filtered.length)
+    return { paged: filtered.slice(start, end), totalPages: total, safePage: safe, startIdx: start, endIdx: end }
+  }, [filtered, page, pageSize])
+
   if (!scope) return <ScopeRequired />
 
-  // ─── ローディング ─────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="max-w-screen-xl space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-slate-200 flex items-center justify-center py-24 gap-3 text-slate-400">
-          <Loader2 size={20} className="animate-spin" />
-          <span className="text-sm">{tc('loading')}</span>
-        </div>
-      </div>
-    )
-  }
-
-  // ─── エラー ────────────────────────────────────────────────────
-  if (fetchError) {
-    return (
-      <div className="max-w-screen-xl space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">{t('subtitle')}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-red-200 flex items-start gap-3 px-6 py-8 text-red-600">
-          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">データの取得に失敗しました</p>
-            <p className="text-xs mt-1 text-red-400 font-mono">{fetchError}</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
+  <PageShell
+    loading={loading}
+    error={fetchError}
+    onRetry={loadInventory}
+    title={t('title')}
+    subtitle={t('subtitle')}
+  >
     <div className="max-w-screen-xl space-y-4">
       {/* ページヘッダー */}
       <div>
@@ -772,13 +838,13 @@ export default function InventoryPage() {
         <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-3">
           <SearchInput
             value={search}
-            onChange={setSearch}
+            onChange={handleSearchChange}
             placeholder={t('searchPlaceholder')}
           />
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as InventoryStatus | 'all')}
+            onChange={(e) => handleStatusChange(e.target.value as InventoryFilterValue)}
             className="px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-teal bg-white text-slate-700"
           >
             {statusOptions.map((opt) => (
@@ -806,20 +872,15 @@ export default function InventoryPage() {
         {/* モバイル：カード表示 */}
         <div className="sm:hidden divide-y divide-slate-100">
           {filtered.length === 0 ? (
-            <div className="py-12 flex flex-col items-center gap-2 text-slate-400">
-              <Package size={28} />
-              <p className="text-sm">{t('empty')}</p>
-              {(search || statusFilter !== 'all') && (
-                <button
-                  onClick={() => { setSearch(''); setStatusFilter('all') }}
-                  className="text-xs text-blue-500 hover:underline mt-1"
-                >
-                  {t('resetFilter')}
-                </button>
-              )}
+            <div className="py-12">
+              <EmptyState
+                icon={<Package size={28} />}
+                message={t('empty')}
+                action={(search || statusFilter !== 'all') ? { label: t('resetFilter'), onClick: resetFilter } : undefined}
+              />
             </div>
           ) : (
-            filtered.map((item) => (
+            paged.map((item) => (
               <div
                 key={item.id}
                 onClick={() => setSelected(item)}
@@ -827,7 +888,7 @@ export default function InventoryPage() {
               >
                 <div className="flex items-start justify-between gap-2 mb-1.5">
                   <span className="font-mono text-xs text-blue-600">{item.productCode}</span>
-                  <StatusBadge status={item.status} />
+                  <InventoryStatusBadge status={item.status} />
                 </div>
                 <p className="text-sm font-medium text-slate-800 mb-1.5">{item.productName}</p>
                 <div className="flex items-center justify-between text-xs text-slate-500">
@@ -899,22 +960,15 @@ export default function InventoryPage() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <Package size={28} />
-                      <p className="text-sm">{t('empty')}</p>
-                      {(search || statusFilter !== 'all') && (
-                        <button
-                          onClick={() => { setSearch(''); setStatusFilter('all') }}
-                          className="text-xs text-blue-500 hover:underline mt-1"
-                        >
-                          {t('resetFilter')}
-                        </button>
-                      )}
-                    </div>
+                    <EmptyState
+                      icon={<Package size={28} />}
+                      message={t('empty')}
+                      action={(search || statusFilter !== 'all') ? { label: t('resetFilter'), onClick: resetFilter } : undefined}
+                    />
                   </td>
                 </tr>
               ) : (
-                filtered.map((item) => (
+                paged.map((item) => (
                   <tr
                     key={item.id}
                     onClick={() => setSelected(item)}
@@ -950,7 +1004,7 @@ export default function InventoryPage() {
                         {item.locationCode}
                       </span>
                     </td>
-                    <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
+                    <td className="px-4 py-3"><InventoryStatusBadge status={item.status} /></td>
                     <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap tabular-nums">
                       {item.receivedDate ?? <span className="text-slate-300">—</span>}
                     </td>
@@ -986,6 +1040,70 @@ export default function InventoryPage() {
             </tbody>
           </table>
         </div>
+
+        {/* ページネーションフッター */}
+        {filtered.length > 0 && (
+          <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* 表示範囲サマリ */}
+            <span className="text-xs text-slate-500">
+              全 <strong className="text-slate-700">{filtered.length.toLocaleString()}</strong> 件中{' '}
+              <strong className="text-slate-700">{(startIdx + 1).toLocaleString()}</strong>–<strong className="text-slate-700">{endIdx.toLocaleString()}</strong> 件を表示
+            </span>
+
+            {/* ページ番号ナビゲーション */}
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handlePageChange(safePage - 1)}
+                  disabled={safePage === 1}
+                  aria-label="前のページ"
+                  className="p-1.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                {getPageWindow(safePage, totalPages).map((p, i) =>
+                  p === '…' ? (
+                    <span key={`e${i}`} className="px-1 text-xs text-slate-400 select-none">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => handlePageChange(p as number)}
+                      className={`min-w-[28px] h-7 px-1.5 text-xs rounded border transition-colors ${
+                        p === safePage
+                          ? 'bg-brand-navy text-white border-brand-navy font-semibold'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  onClick={() => handlePageChange(safePage + 1)}
+                  disabled={safePage === totalPages}
+                  aria-label="次のページ"
+                  className="p-1.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
+
+            {/* 表示件数選択 */}
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-xs text-slate-500">{t('pageSizeLabel')}</span>
+              <select
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value) as PageSizeOption)}
+                className="px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-brand-teal bg-white text-slate-700"
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n}{tc('countUnit')}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {selected && (
@@ -1002,5 +1120,6 @@ export default function InventoryPage() {
         <ChangeStatusModal item={actionItem} onSuccess={handleOperationSuccess} onClose={handleOperationClose} />
       )}
     </div>
+  </PageShell>
   )
 }

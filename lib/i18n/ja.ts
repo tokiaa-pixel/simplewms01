@@ -218,6 +218,7 @@ export const ja: Translations = {
     resetFilter:         'フィルタをリセット',
     empty:               '該当する在庫データがありません',
     colActions:          '操作',
+    pageSizeLabel:       '表示件数',
   },
 
   shipping: {
