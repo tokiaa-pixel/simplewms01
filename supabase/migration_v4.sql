@@ -71,6 +71,14 @@ BEGIN
 EXCEPTION WHEN others THEN NULL;
 END $$;
 
+DO $$
+BEGIN
+  -- 手動命名された CHECK 制約を削除（DB によって命名が異なる場合に備える）
+  ALTER TABLE inventory_transactions
+    DROP CONSTRAINT IF EXISTS chk_tx_type;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
 ALTER TABLE inventory_transactions
   ADD CONSTRAINT inventory_transactions_transaction_type_check
   CHECK (transaction_type IN (

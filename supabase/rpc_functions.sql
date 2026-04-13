@@ -299,7 +299,7 @@ BEGIN
         INSERT INTO inventory_transactions (
           tenant_id,    warehouse_id,    inventory_id,     product_id,
           transaction_type,
-          qty_delta,
+          qty,          qty_delta,
           before_on_hand_qty,   after_on_hand_qty,
           before_allocated_qty, after_allocated_qty,
           received_date,        lot_no,                   expiry_date,
@@ -308,7 +308,7 @@ BEGIN
         ) VALUES (
           p_tenant_id,   p_warehouse_id,  v_fifo_inv.id,    v_fifo_inv.product_id,
           'allocation',
-          0,
+          0,             0,
           v_fifo_inv.on_hand_qty,    v_fifo_inv.on_hand_qty,
           v_fifo_inv.allocated_qty,  v_fifo_inv.allocated_qty + v_add_qty,
           v_fifo_inv.received_date,  v_fifo_inv.lot_no,        v_fifo_inv.expiry_date,
@@ -377,7 +377,7 @@ BEGIN
         INSERT INTO inventory_transactions (
           tenant_id,    warehouse_id,    inventory_id,   product_id,
           transaction_type,
-          qty_delta,
+          qty,          qty_delta,
           before_on_hand_qty,   after_on_hand_qty,
           before_allocated_qty, after_allocated_qty,
           received_date,        lot_no,                 expiry_date,
@@ -386,7 +386,7 @@ BEGIN
         ) VALUES (
           p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
           'allocation',
-          0,
+          0,             0,
           v_inv.on_hand_qty,    v_inv.on_hand_qty,
           v_inv.allocated_qty,  v_inv.allocated_qty + v_add_qty,
           v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
@@ -532,7 +532,7 @@ BEGIN
       INSERT INTO inventory_transactions (
         tenant_id,    warehouse_id,    inventory_id,   product_id,
         transaction_type,
-        qty_delta,
+        qty,          qty_delta,
         before_on_hand_qty,   after_on_hand_qty,
         before_allocated_qty, after_allocated_qty,
         received_date,        lot_no,                 expiry_date,
@@ -540,7 +540,7 @@ BEGIN
       ) VALUES (
         p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
         'shipping',
-        -v_deduct,
+        -v_deduct,     -v_deduct,
         v_inv.on_hand_qty,    GREATEST(0, v_inv.on_hand_qty   - v_deduct),
         v_inv.allocated_qty,  GREATEST(0, v_inv.allocated_qty - v_alloc.allocated_qty),
         v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
@@ -690,7 +690,7 @@ BEGIN
     INSERT INTO inventory_transactions (
       tenant_id,    warehouse_id,    inventory_id,   product_id,
       transaction_type,
-      qty_delta,
+      qty,          qty_delta,
       before_on_hand_qty,   after_on_hand_qty,
       before_allocated_qty, after_allocated_qty,
       received_date,        lot_no,                 expiry_date,
@@ -698,7 +698,7 @@ BEGIN
     ) VALUES (
       p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
       'deallocation',
-      0,
+      0,             0,
       v_inv.on_hand_qty,    v_inv.on_hand_qty,
       v_inv.allocated_qty,  v_inv.allocated_qty - v_qty,
       v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
@@ -824,14 +824,14 @@ BEGIN
     tenant_id, warehouse_id, inventory_id, product_id,
     transaction_type,
     from_location_id, to_location_id,
-    qty_delta,
+    qty,          qty_delta,
     before_on_hand_qty, after_on_hand_qty,
     reason, executed_by
   ) VALUES (
     v_src.tenant_id, v_src.warehouse_id, p_inventory_id, v_src.product_id,
     'move',
     v_src.location_id, p_destination_location_id,
-    p_move_qty,
+    p_move_qty,   p_move_qty,
     v_src.on_hand_qty, v_src.on_hand_qty - p_move_qty,
     p_reason, p_executed_by
   );
@@ -916,13 +916,13 @@ BEGIN
   INSERT INTO inventory_transactions (
     tenant_id, warehouse_id, inventory_id, product_id,
     transaction_type,
-    qty_delta,
+    qty,    qty_delta,
     before_on_hand_qty, after_on_hand_qty,
     reason, note, executed_by
   ) VALUES (
     v_src.tenant_id, v_src.warehouse_id, p_inventory_id, v_src.product_id,
     v_tx_type,
-    p_qty,
+    p_qty,  p_qty,
     v_src.on_hand_qty, v_new_qty,
     p_reason, p_note, p_executed_by
   );
@@ -1023,14 +1023,14 @@ BEGIN
     tenant_id, warehouse_id, inventory_id, product_id,
     transaction_type,
     from_status, to_status,
-    qty_delta,
+    qty,            qty_delta,
     before_on_hand_qty, after_on_hand_qty,
     reason, executed_by
   ) VALUES (
     v_src.tenant_id, v_src.warehouse_id, p_inventory_id, v_src.product_id,
     'status_change',
     v_src.status, p_new_status,
-    p_change_qty,
+    p_change_qty,   p_change_qty,
     v_src.on_hand_qty, v_src.on_hand_qty - p_change_qty,
     p_reason, p_executed_by
   );

@@ -90,11 +90,12 @@ function PickingModal({
   const [deallocatingId, setDeallocatingId] = useState<string | null>(null)
 
   // 引当行を棚番順に1行ずつ展開（ピッキングルート順）
-  // allocations がある場合は棚ごとに1行、ない場合は item をそのまま1行にフォールバック
+  // allocations が存在しない item はピッキング対象外のため行を生成しない。
+  // 引当解除後に allocations が空になった item は自動的に一覧から消える。
   type PickRow = {
     key:          string
-    allocationId: string | null   // shipping_allocations.id（解除ボタンに使用）
-    lineId:       string          // shipping_lines.id
+    allocationId: string           // shipping_allocations.id（解除ボタンに使用）
+    lineId:       string           // shipping_lines.id
     locationCode: string
     productCode:  string
     productName:  string
@@ -103,30 +104,23 @@ function PickingModal({
   }
   const pickingRows: PickRow[] = order.items
     .flatMap((item): PickRow[] => {
-      if (item.allocations.length > 0) {
-        return item.allocations.map((alloc: ShippingLineAllocation) => ({
-          key:          `${item.id}-${alloc.locationCode}`,
-          allocationId: alloc.id,
-          lineId:       item.id,
-          locationCode: alloc.locationCode,
-          productCode:  item.productCode,
-          productName:  item.productName,
-          unit:         item.unit,
-          qty:          alloc.allocatedQty,
-        }))
-      }
-      return [{
-        key:          item.id,
-        allocationId: null,
+      // allocations が空の場合は行を生成しない（引当なし = ピッキング対象外）
+      if (item.allocations.length === 0) return []
+      return item.allocations.map((alloc: ShippingLineAllocation) => ({
+        key:          `${item.id}-${alloc.locationCode}`,
+        allocationId: alloc.id,
         lineId:       item.id,
-        locationCode: item.locationCode || '—',
+        locationCode: alloc.locationCode,
         productCode:  item.productCode,
         productName:  item.productName,
         unit:         item.unit,
-        qty:          item.orderedQuantity,
-      }]
+        qty:          alloc.allocatedQty,
+      }))
     })
     .sort((a, b) => a.locationCode.localeCompare(b.locationCode))
+
+  // 有効な引当行が1件でもあるかどうか（ボタン活性・empty state の判定）
+  const hasPickingRows = pickingRows.length > 0
 
   const handleDealloc = async (row: PickRow) => {
     if (!row.allocationId) return
@@ -195,37 +189,37 @@ function PickingModal({
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
             {t('pickingListTitle')}
           </p>
-          <div className="border border-slate-200 rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblShelf')}</th>
-                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
-                  <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
-                  <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDone')}</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {pickingRows.map((row) => (
-                  <tr key={row.key}>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                        {row.locationCode}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-blue-600">{row.productCode}</td>
-                    <td className="px-4 py-3 text-slate-700">{row.productName}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold">
-                      {row.qty}
-                      <span className="text-slate-400 font-normal ml-1">{row.unit}</span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <input type="checkbox" className="w-4 h-4 accent-blue-600" />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {row.allocationId && (
+          {hasPickingRows ? (
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblShelf')}</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                    <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
+                    <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDone')}</th>
+                    <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pickingRows.map((row) => (
+                    <tr key={row.key}>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                          {row.locationCode}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-blue-600">{row.productCode}</td>
+                      <td className="px-4 py-3 text-slate-700">{row.productName}</td>
+                      <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                        {row.qty}
+                        <span className="text-slate-400 font-normal ml-1">{row.unit}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <input type="checkbox" className="w-4 h-4 accent-blue-600" />
+                      </td>
+                      <td className="px-4 py-3 text-center">
                         <button
                           onClick={() => handleDealloc(row)}
                           disabled={deallocatingId !== null}
@@ -237,13 +231,18 @@ function PickingModal({
                             : <Trash2 size={13} />
                           }
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-6 text-center">
+              <p className="text-sm font-medium text-amber-700">引当がないためピッキング対象がありません</p>
+              <p className="text-xs text-amber-600 mt-1">先に出庫指示の引当を設定してください</p>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -257,7 +256,7 @@ function PickingModal({
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
             {tc('cancel')}
           </button>
-          <button onClick={handleStart} disabled={loading}
+          <button onClick={handleStart} disabled={loading || !hasPickingRows}
             className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-brand-navy rounded-md hover:bg-brand-navy-mid disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2">
             {loading ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={15} />}
             {t('pickingStartBtn')}
