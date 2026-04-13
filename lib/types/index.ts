@@ -223,11 +223,15 @@ export const SHIPPING_STATUS_CONFIG: Record<
 // ─── 在庫操作履歴 ────────────────────────────────────────────
 
 export type InventoryTransactionType =
-  | 'move'
-  | 'adjust_increase'
-  | 'adjust_decrease'
-  | 'adjust_set'
-  | 'status_change'
+  | 'receiving'        // 入庫確定
+  | 'shipping'         // 出荷確定
+  | 'allocation'       // 引当確定（on_hand_qty 不変、allocated_qty 増加）
+  | 'deallocation'     // 引当解除（on_hand_qty 不変、allocated_qty 減少）
+  | 'move'             // ロケーション移動
+  | 'adjust_increase'  // 数量増加調整
+  | 'adjust_decrease'  // 数量減少調整
+  | 'adjust_set'       // 棚卸上書き
+  | 'status_change'    // ステータス変更
 
 export interface InventoryTransaction {
   id:                  string

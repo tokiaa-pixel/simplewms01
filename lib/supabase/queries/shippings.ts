@@ -1,6 +1,12 @@
 import { supabase } from '@/lib/supabase/client'
 import type { InventoryStatus, ShippingStatus, QueryScope } from '@/lib/types'
 
+// 純粋関数・型定義は allocation.ts に分離（Supabase 依存なし・ユニットテスト可能）
+export type { InventoryLine, AllocationItem } from './allocation'
+export { FIFO_ELIGIBLE_STATUSES, computeFifoAllocation, validateManualAllocations } from './allocation'
+import type { InventoryLine, AllocationItem } from './allocation'
+import { FIFO_ELIGIBLE_STATUSES } from './allocation'
+
 // Supabase typed client が DML の Insert/Update 型を never に解決するため、
 // INSERT / UPDATE のみ any キャストで回避する。SELECT は typed client を使用。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,42 +45,6 @@ export type ShipProductOption = {
   unit:     string
   category: string
 }
-
-/** 在庫1行（引当候補） */
-export type InventoryLine = {
-  inventoryId:  string
-  locationId:   string
-  locationCode: string
-  locationName: string
-  status:       InventoryStatus
-  onHandQty:    number         // 実在庫（表示用）
-  allocatedQty: number         // 引当済み（表示用）
-  availableQty: number         // 引当可能 = onHandQty - allocatedQty
-  receivedDate: string | null  // FIFO ソートキー（YYYY-MM-DD）
-}
-
-/** 引当の1フラグメント（1つの在庫行から何個引き当てるか） */
-export type AllocationItem = {
-  inventoryId:  string
-  locationId:   string
-  locationCode: string
-  locationName: string
-  status:       InventoryStatus
-  availableQty: number         // その行の引当可能数（表示用）
-  allocatedQty: number         // 今回引き当てる数
-  receivedDate: string | null
-}
-
-// =============================================================
-// 引当ステータス定数
-// =============================================================
-
-/**
- * FIFO 自動引当の対象とする在庫ステータス。
- * hold / damaged は自動引当の対象外。
- * 将来新しいステータスを追加する場合はこの配列を修正する。
- */
-export const FIFO_ELIGIBLE_STATUSES: InventoryStatus[] = ['available']
 
 // =============================================================
 // 内部ユーティリティ
@@ -261,46 +231,6 @@ export async function fetchInventoryForManualAllocation(
 }
 
 // =============================================================
-// FIFO 自動引当計算（純粋関数・DB アクセスなし）
-// =============================================================
-
-/**
- * FIFO 自動引当の計算（純粋関数・DB アクセスなし）。
- * 呼び出し元は fetchInventoryForProduct（FIFO_ELIGIBLE_STATUSES でフィルタ済み）から
- * 取得した lines を渡すこと。hold / damaged の行はここに渡されない前提。
- *
- * - received_date ASC でソート済みの lines を先頭から順に引き当てる
- * - available_qty を超えた引当は行わない
- * - 在庫不足の場合は可能な限り引当て、不足分は呼び出し元が検知する
- */
-export function computeFifoAllocation(
-  lines: InventoryLine[],
-  requestedQty: number,
-): AllocationItem[] {
-  const result: AllocationItem[] = []
-  let remaining = requestedQty
-
-  for (const line of lines) {
-    if (remaining <= 0) break
-    const take = Math.min(line.availableQty, remaining)
-    if (take <= 0) continue
-    result.push({
-      inventoryId:  line.inventoryId,
-      locationId:   line.locationId,
-      locationCode: line.locationCode,
-      locationName: line.locationName,
-      status:       line.status,
-      availableQty: line.availableQty,
-      allocatedQty: take,
-      receivedDate: line.receivedDate,
-    })
-    remaining -= take
-  }
-
-  return result
-}
-
-// =============================================================
 // 出庫指示番号の重複チェック
 // =============================================================
 
@@ -346,7 +276,16 @@ export async function generateShippingNo(scope: QueryScope): Promise<string> {
 
 // =============================================================
 // 出庫指示登録（header + lines + allocations）
-// 引当確定と同時に inventory.allocated_qty を加算する
+// rpc_allocate_shipping_inventory を呼び出し、単一トランザクションで実行する。
+//
+// 【フェーズ3-3 変更内容】
+//   旧実装: shipping_headers → shipping_lines → shipping_allocations →
+//           inventory.allocated_qty を逐次 Supabase 呼び出しで更新
+//           → 非原子・TOCTOU 競合リスクあり
+//   新実装: rpc_allocate_shipping_inventory を 1 回呼び出すだけ
+//           → FOR UPDATE + 単一トランザクションで原子的に実行
+//
+// 【インターフェース】呼び出し元（shipping/input/page.tsx）への変更なし。
 // =============================================================
 
 export async function createShippingOrder(params: {
@@ -359,7 +298,13 @@ export async function createShippingOrder(params: {
     lineNo:       number
     productId:    string
     requestedQty: number
-    allocations:  Array<{
+    /**
+     * 引当戦略。
+     * - 'fifo'  : RPC 側が received_date ASC で自動引当（allocations は空でよい）
+     * - 'manual': フロント側で選択した allocations をそのまま使用
+     */
+    strategy:     'fifo' | 'manual'
+    allocations:  Array<{             // strategy='fifo' の場合は空配列 [] を渡すこと
       inventoryId:  string
       allocatedQty: number
     }>
@@ -367,106 +312,40 @@ export async function createShippingOrder(params: {
 }): Promise<{ error: string | null }> {
   const { shippingNo, shippingDate, customerId, memo, scope, lines } = params
 
-  try {
-    // ── Step 1: shipping_headers を INSERT ───────────────────
-    const { data: headerData, error: headerErr } = await dml('shipping_headers')
-      .insert({
-        shipping_no:   shippingNo,
-        shipping_date: shippingDate,
-        customer_id:   customerId,
-        status:        'pending',
-        memo:          memo ?? null,
-        tenant_id:     scope.tenantId,
-        warehouse_id:  scope.warehouseId,
-      })
-      .select('id')
-      .single()
+  // RPC に渡す lines を camelCase → RPC が期待するキー名に変換。
+  // FIFO 行は allocations を空配列にすることで RPC 側に自動引当を委譲する。
+  const rpcLines = lines.map((l) => ({
+    lineNo:       l.lineNo,
+    productId:    l.productId,
+    requestedQty: l.requestedQty,
+    strategy:     l.strategy,
+    allocations:  l.strategy === 'fifo'
+      ? []
+      : l.allocations.map((a) => ({
+          inventoryId:  a.inventoryId,
+          allocatedQty: a.allocatedQty,
+        })),
+  }))
 
-    if (headerErr) throw new Error(`ヘッダー登録エラー: ${headerErr.message}`)
+  // Supabase typed client はカスタム RPC 関数の型を持たないため any キャストで呼び出す。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('rpc_allocate_shipping_inventory', {
+    p_shipping_no:   shippingNo,
+    p_shipping_date: shippingDate,
+    p_customer_id:   customerId,
+    p_memo:          memo ?? null,
+    p_tenant_id:     scope.tenantId,
+    p_warehouse_id:  scope.warehouseId,
+    p_lines:         rpcLines,
+  })
 
-    const headerId = (headerData as unknown as { id: string }).id
+  // PostgREST レベルのネットワーク/認証エラー
+  if (error) return { error: (error as { message: string }).message }
 
-    // ── Step 2: shipping_lines を一括 INSERT ──────────────────
-    const lineRecords = lines.map((l) => ({
-      header_id:     headerId,
-      line_no:       l.lineNo,
-      product_id:    l.productId,
-      requested_qty: l.requestedQty,
-      shipped_qty:   0,
-      status:        'pending',
-      tenant_id:     scope.tenantId,
-      warehouse_id:  scope.warehouseId,
-    }))
-
-    const { data: lineData, error: linesErr } = await dml('shipping_lines')
-      .insert(lineRecords)
-      .select('id, line_no')
-
-    if (linesErr) throw new Error(`明細登録エラー: ${linesErr.message}`)
-
-    type LineResult = { id: string; line_no: number }
-    const lineResults = lineData as unknown as LineResult[]
-
-    // ── Step 3: shipping_allocations を一括 INSERT ────���────────
-    const allAllocs = lines.flatMap((l) => {
-      const lineResult = lineResults.find((r) => r.line_no === l.lineNo)
-      if (!lineResult) return []
-      return l.allocations.map((a) => ({
-        line_id:       lineResult.id,
-        inventory_id:  a.inventoryId,
-        allocated_qty: a.allocatedQty,
-      }))
-    })
-
-    if (allAllocs.length > 0) {
-      const { error: allocErr } = await dml('shipping_allocations')
-        .insert(allAllocs)
-      if (allocErr) throw new Error(`引当登録エラー: ${allocErr.message}`)
-    }
-
-    // ── Step 4: inventory.allocated_qty を加算 ────────────────
-    // 同一 inventory_id への引当を集約してから更新する
-    const allocByInventory = new Map<string, number>()
-    for (const l of lines) {
-      for (const a of l.allocations) {
-        allocByInventory.set(
-          a.inventoryId,
-          (allocByInventory.get(a.inventoryId) ?? 0) + a.allocatedQty,
-        )
-      }
-    }
-
-    for (const [inventoryId, addQty] of allocByInventory) {
-      // 現在の on_hand_qty / allocated_qty を取得して available_qty を確認
-      const { data: invRaw, error: invSelectErr } = await supabase
-        .from('inventory')
-        .select('on_hand_qty, allocated_qty')
-        .eq('id', inventoryId)
-        .single()
-
-      if (invSelectErr) throw new Error(`在庫取得エラー: ${invSelectErr.message}`)
-
-      type InvRow = { on_hand_qty: number; allocated_qty: number }
-      const inv = invRaw as unknown as InvRow
-      const available = Math.max(0, (inv.on_hand_qty ?? 0) - (inv.allocated_qty ?? 0))
-
-      if (addQty > available) {
-        throw new Error(
-          `引当可能数を超えています（在庫ID: ${inventoryId}, 引当可能: ${available}, 要求: ${addQty}）`
-        )
-      }
-
-      const { error: invUpdateErr } = await dml('inventory')
-        .update({ allocated_qty: (inv.allocated_qty ?? 0) + addQty })
-        .eq('id', inventoryId)
-
-      if (invUpdateErr) throw new Error(`在庫引当更新エラー: ${invUpdateErr.message}`)
-    }
-
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
-  }
+  // RPC 内のビジネスエラー（EXCEPTION でキャッチされた場合）
+  type RpcResult = { error: string | null }
+  const result = data as RpcResult
+  return { error: result?.error ?? null }
 }
 
 // =============================================================
@@ -761,79 +640,31 @@ export async function completeShippingInspection(
 
 /**
  * inspected → shipped
- * 在庫の on_hand_qty / allocated_qty を減算し、ヘッダーを shipped に更新する。
+ *
+ * 【フェーズ3-5 変更内容】
+ *   旧実装: shipping_lines / inventory を逐次 Supabase 呼び出しで更新
+ *           → 非原子・inventory_transactions レコードなし・shipped_qty 配分バグあり
+ *   新実装: rpc_confirm_shipping_order を 1 回呼び出すだけ
+ *           → FOR UPDATE + 単一トランザクションで原子的に実行
+ *           → inventory_transactions に 'shipping' タイプで記録
+ *           → shipped_qty を v_remaining でデクリメント配分（バグ修正）
+ *
+ * @param headerId  shipping_headers.id
+ * @param scope     tenant_id / warehouse_id（RPC でのスコープ検証に使用）
  */
-export async function confirmShippingOrder(headerId: string): Promise<{ error: string | null }> {
-  try {
-    // ── Step 1: 全明細 + 引当を取得 ──────────────────────────────
-    const { data: linesRaw, error: linesErr } = await supabase
-      .from('shipping_lines')
-      .select(`
-        id, shipped_qty,
-        shipping_allocations ( inventory_id, allocated_qty )
-      `)
-      .eq('header_id', headerId)
+export async function confirmShippingOrder(
+  headerId: string,
+  scope:    QueryScope,
+): Promise<{ error: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('rpc_confirm_shipping_order', {
+    p_header_id:    headerId,
+    p_tenant_id:    scope.tenantId,
+    p_warehouse_id: scope.warehouseId,
+  })
 
-    if (linesErr) throw new Error(`明細取得エラー: ${linesErr.message}`)
+  if (error) return { error: (error as { message: string }).message }
 
-    type LineWithAlloc = {
-      id: string
-      shipped_qty: number
-      shipping_allocations: Array<{ inventory_id: string; allocated_qty: number }>
-    }
-    const lines = linesRaw as unknown as LineWithAlloc[]
-
-    // ── Step 2: 在庫を減算 ────────────────────────────────────────
-    const allocByInventory = new Map<string, number>()
-    for (const line of lines) {
-      for (const a of line.shipping_allocations) {
-        // 引当数と実績数の小さい方を減算（過剰引当を防ぐ）
-        const deduct = Math.min(a.allocated_qty, line.shipped_qty)
-        allocByInventory.set(
-          a.inventory_id,
-          (allocByInventory.get(a.inventory_id) ?? 0) + deduct,
-        )
-      }
-    }
-
-    for (const [inventoryId, deductQty] of allocByInventory) {
-      const { data: invRaw, error: invSelectErr } = await supabase
-        .from('inventory')
-        .select('on_hand_qty, allocated_qty')
-        .eq('id', inventoryId)
-        .single()
-
-      if (invSelectErr) throw new Error(`在庫取得エラー: ${invSelectErr.message}`)
-
-      type InvRow = { on_hand_qty: number; allocated_qty: number }
-      const inv = invRaw as unknown as InvRow
-
-      const { error: invUpdateErr } = await dml('inventory')
-        .update({
-          on_hand_qty:   Math.max(0, (inv.on_hand_qty   ?? 0) - deductQty),
-          allocated_qty: Math.max(0, (inv.allocated_qty ?? 0) - deductQty),
-        })
-        .eq('id', inventoryId)
-
-      if (invUpdateErr) throw new Error(`在庫減算エラー: ${invUpdateErr.message}`)
-    }
-
-    // ── Step 3: 全明細を completed に ────────────────────────────
-    const { error: linesUpdateErr } = await dml('shipping_lines')
-      .update({ status: 'completed' })
-      .eq('header_id', headerId)
-
-    if (linesUpdateErr) throw new Error(`明細ステータス更新エラー: ${linesUpdateErr.message}`)
-
-    // ── Step 4: ヘッダーを shipped に ────────────────────────────
-    const { error: headerErr } = await dml('shipping_headers')
-      .update({ status: 'shipped' })
-      .eq('id', headerId)
-
-    if (headerErr) throw new Error(`ヘッダー更新エラー: ${headerErr.message}`)
-
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : '不明なエラーが発生しました' }
-  }
+  type RpcResult = { error: string | null }
+  return { error: (data as RpcResult)?.error ?? null }
 }

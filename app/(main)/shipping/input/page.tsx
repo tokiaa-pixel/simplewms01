@@ -666,10 +666,15 @@ export default function ShippingInputPage() {
         lineNo:       i + 1,
         productId:    l.productId,
         requestedQty: Number(l.requestedQty),
-        allocations:  l.allocations.map((a) => ({
-          inventoryId:  a.inventoryId,
-          allocatedQty: a.allocatedQty,
-        })),
+        // FIFO 行はサーバー側で引当を再計算するため allocations は空で送る。
+        // プレビューの allocs は UX 用（在庫プレビュー）であり、コミット時は破棄する。
+        strategy:     l.allocationMode === 'fifo' ? 'fifo' : 'manual',
+        allocations:  l.allocationMode === 'fifo'
+          ? []
+          : l.allocations.map((a) => ({
+              inventoryId:  a.inventoryId,
+              allocatedQty: a.allocatedQty,
+            })),
       })),
       scope,
     })

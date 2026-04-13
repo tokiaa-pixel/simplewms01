@@ -198,15 +198,26 @@ RETURNS json
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+-- =============================================================================
+-- フェーズ3-3 強化内容:
+--   1. テナント/倉庫境界チェック（他テナントの在庫への誤引当を防止）
+--   2. status = 'available' のみ引当対象とする
+--   3. inventory_transactions に 'allocation' レコードを挿入（監査ログ）
+--   4. shipping_lines.allocated_qty を行ごとの合計で同期
+-- =============================================================================
 DECLARE
-  v_header_id  uuid;
-  v_line_id    uuid;
-  v_line       json;
-  v_alloc      json;
-  v_on_hand    integer;
-  v_allocated  integer;
-  v_avail      integer;
-  v_add_qty    integer;
+  v_header_id        uuid;
+  v_line_id          uuid;
+  v_line             json;
+  v_alloc            json;
+  v_inv              record;      -- inventory 行（FOR UPDATE でロック取得後の全フィールド）
+  v_avail            integer;
+  v_add_qty          integer;
+  v_line_alloc_total integer;     -- 1明細行の引当合計（shipping_lines.allocated_qty 同期用）
+  -- フェーズ3-4: FIFO 戦略用
+  v_strategy         text;        -- 引当戦略: 'fifo' | 'manual'（デフォルト: 'manual'）
+  v_fifo_inv         record;      -- FIFO 引当候補在庫行
+  v_remaining        integer;     -- FIFO 残余引当数
 BEGIN
   -- ── Step 1: shipping_headers を INSERT ──────────────────────────
   INSERT INTO shipping_headers (
@@ -221,9 +232,12 @@ BEGIN
   -- ── Step 2: 各明細を処理 ──────────────────────────────────────
   FOR v_line IN SELECT * FROM json_array_elements(p_lines)
   LOOP
-    -- shipping_lines を INSERT
+    v_line_alloc_total := 0;
+
+    -- shipping_lines を INSERT（allocated_qty は 0 で初期化し、後で同期）
     INSERT INTO shipping_lines (
-      header_id, line_no, product_id, requested_qty, shipped_qty, status,
+      header_id, line_no, product_id, requested_qty, shipped_qty,
+      allocated_qty, status,
       tenant_id, warehouse_id
     ) VALUES (
       v_header_id,
@@ -231,46 +245,165 @@ BEGIN
       (v_line->>'productId')::uuid,
       (v_line->>'requestedQty')::integer,
       0,
+      0,
       'pending',
       p_tenant_id,
       p_warehouse_id
     )
     RETURNING id INTO v_line_id;
 
-    -- 各引当（allocation）を処理
-    FOR v_alloc IN SELECT * FROM json_array_elements(v_line->'allocations')
-    LOOP
-      v_add_qty := (v_alloc->>'allocatedQty')::integer;
+    -- ── 引当戦略に応じた処理 ──────────────────────────────────
+    -- strategy: 'fifo'   → received_date ASC でサーバー側自動引当（フェーズ3-4）
+    -- strategy: 'manual' → フロント側で選択した allocations をそのまま使用（フェーズ3-3）
+    -- 未指定             → 'manual' にフォールバック（後方互換）
+    v_strategy := COALESCE(v_line->>'strategy', 'manual');
 
-      -- 在庫行を FOR UPDATE でロック（同時書き込み防止）
-      SELECT on_hand_qty, allocated_qty
-      INTO   v_on_hand,   v_allocated
-      FROM   inventory
-      WHERE  id = (v_alloc->>'inventoryId')::uuid
-      FOR UPDATE;
+    IF v_strategy = 'fifo' THEN
+      -- ── FIFO 自動引当 ─────────────────────────────────────────
+      -- available 在庫を received_date ASC NULLS LAST 順にロックしながら貪欲に引き当てる。
+      -- 在庫不足の場合は引当可能な分だけ割り当てる（部分引当許容）。
+      -- ORDER BY id ASC を追加してロック順を一定にし deadlock を防ぐ。
+      v_remaining := (v_line->>'requestedQty')::integer;
 
-      IF NOT FOUND THEN
-        RAISE EXCEPTION '在庫行が見つかりません（inventory_id: %）',
-          (v_alloc->>'inventoryId');
-      END IF;
+      FOR v_fifo_inv IN
+        SELECT id, tenant_id, warehouse_id, product_id,
+               on_hand_qty, allocated_qty, status,
+               received_date, lot_no, expiry_date   -- フェーズ3-5: FEFO トレーサビリティ用
+        FROM   inventory
+        WHERE  product_id   = (v_line->>'productId')::uuid
+          AND  tenant_id    = p_tenant_id
+          AND  warehouse_id = p_warehouse_id
+          AND  status       = 'available'
+          AND  on_hand_qty - allocated_qty > 0
+        ORDER BY received_date ASC NULLS LAST, id ASC
+        FOR UPDATE
+      LOOP
+        EXIT WHEN v_remaining <= 0;
 
-      -- 引当可能数チェック
-      v_avail := GREATEST(0, v_on_hand - v_allocated);
-      IF v_add_qty > v_avail THEN
-        RAISE EXCEPTION '引当可能数を超えています（在庫ID: %, 引当可能: %, 要求: %）',
-          (v_alloc->>'inventoryId'), v_avail, v_add_qty;
-      END IF;
+        v_avail   := GREATEST(0, v_fifo_inv.on_hand_qty - v_fifo_inv.allocated_qty);
+        v_add_qty := LEAST(v_avail, v_remaining);
+        IF v_add_qty <= 0 THEN CONTINUE; END IF;
 
-      -- shipping_allocations を INSERT
-      INSERT INTO shipping_allocations (line_id, inventory_id, allocated_qty)
-      VALUES (v_line_id, (v_alloc->>'inventoryId')::uuid, v_add_qty);
+        -- ① shipping_allocations を INSERT
+        INSERT INTO shipping_allocations (line_id, inventory_id, allocated_qty)
+        VALUES (v_line_id, v_fifo_inv.id, v_add_qty);
 
-      -- inventory.allocated_qty を加算
-      UPDATE inventory
-      SET    allocated_qty = v_allocated + v_add_qty
-      WHERE  id = (v_alloc->>'inventoryId')::uuid;
-    END LOOP;
-  END LOOP;
+        -- ② inventory.allocated_qty を加算
+        UPDATE inventory
+        SET    allocated_qty = v_fifo_inv.allocated_qty + v_add_qty
+        WHERE  id = v_fifo_inv.id;
+
+        -- ③ inventory_transactions に引当イベントを記録
+        --    received_date / lot_no / expiry_date をスナップショットとして保持（FEFO 対応前準備）
+        --    note に引当戦略を記録（監査・将来 FEFO 切り替え時の確認に使用）
+        INSERT INTO inventory_transactions (
+          tenant_id,    warehouse_id,    inventory_id,     product_id,
+          transaction_type,
+          qty_delta,
+          before_on_hand_qty,   after_on_hand_qty,
+          before_allocated_qty, after_allocated_qty,
+          received_date,        lot_no,                   expiry_date,
+          reference_type,       reference_id,
+          note
+        ) VALUES (
+          p_tenant_id,   p_warehouse_id,  v_fifo_inv.id,    v_fifo_inv.product_id,
+          'allocation',
+          0,
+          v_fifo_inv.on_hand_qty,    v_fifo_inv.on_hand_qty,
+          v_fifo_inv.allocated_qty,  v_fifo_inv.allocated_qty + v_add_qty,
+          v_fifo_inv.received_date,  v_fifo_inv.lot_no,        v_fifo_inv.expiry_date,
+          'shipping_line',           v_line_id,
+          'strategy:fifo'
+        );
+
+        v_remaining        := v_remaining - v_add_qty;
+        v_line_alloc_total := v_line_alloc_total + v_add_qty;
+      END LOOP;  -- FIFO 在庫スキャン
+
+    ELSE
+      -- ── 手動引当: フロント側で選択した allocations を使用 ────────
+      FOR v_alloc IN SELECT * FROM json_array_elements(v_line->'allocations')
+      LOOP
+        v_add_qty := (v_alloc->>'allocatedQty')::integer;
+
+        -- ① 在庫行を FOR UPDATE でロック（同時書き込み防止）
+        --    received_date / lot_no / expiry_date も取得（FEFO トレーサビリティ用）
+        SELECT id, tenant_id, warehouse_id, product_id,
+               on_hand_qty, allocated_qty, status,
+               received_date, lot_no, expiry_date
+        INTO   v_inv
+        FROM   inventory
+        WHERE  id = (v_alloc->>'inventoryId')::uuid
+        FOR UPDATE;
+
+        -- ② 在庫行の存在チェック
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '在庫行が見つかりません（inventory_id: %）',
+            (v_alloc->>'inventoryId');
+        END IF;
+
+        -- ③ テナント/倉庫境界チェック（他テナントの在庫への誤引当を防止）
+        IF v_inv.tenant_id != p_tenant_id OR v_inv.warehouse_id != p_warehouse_id THEN
+          RAISE EXCEPTION 'テナントまたは倉庫の境界違反（inventory_id: %, expected tenant: %, warehouse: %）',
+            v_inv.id, p_tenant_id, p_warehouse_id;
+        END IF;
+
+        -- ④ ステータスチェック（available のみ引当対象）
+        IF v_inv.status != 'available' THEN
+          RAISE EXCEPTION '引当対象外のステータスです（status: %, inventory_id: %）',
+            v_inv.status, v_inv.id;
+        END IF;
+
+        -- ⑤ 引当可能数チェック
+        v_avail := GREATEST(0, v_inv.on_hand_qty - v_inv.allocated_qty);
+        IF v_add_qty > v_avail THEN
+          RAISE EXCEPTION '引当可能数を超えています（在庫ID: %, 引当可能: %, 要求: %）',
+            v_inv.id, v_avail, v_add_qty;
+        END IF;
+
+        -- ⑥ shipping_allocations を INSERT
+        INSERT INTO shipping_allocations (line_id, inventory_id, allocated_qty)
+        VALUES (v_line_id, v_inv.id, v_add_qty);
+
+        -- ⑦ inventory.allocated_qty を加算
+        UPDATE inventory
+        SET    allocated_qty = v_inv.allocated_qty + v_add_qty
+        WHERE  id = v_inv.id;
+
+        -- ⑧ inventory_transactions に引当イベントを記録
+        --    on_hand_qty は変化しない（qty_delta = 0）
+        --    received_date / lot_no / expiry_date をスナップショットとして保持（FEFO 対応前準備）
+        --    note に引当戦略を記録（監査・将来 FEFO 切り替え時の確認に使用）
+        INSERT INTO inventory_transactions (
+          tenant_id,    warehouse_id,    inventory_id,   product_id,
+          transaction_type,
+          qty_delta,
+          before_on_hand_qty,   after_on_hand_qty,
+          before_allocated_qty, after_allocated_qty,
+          received_date,        lot_no,                 expiry_date,
+          reference_type,       reference_id,
+          note
+        ) VALUES (
+          p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
+          'allocation',
+          0,
+          v_inv.on_hand_qty,    v_inv.on_hand_qty,
+          v_inv.allocated_qty,  v_inv.allocated_qty + v_add_qty,
+          v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
+          'shipping_line',      v_line_id,
+          'strategy:manual'
+        );
+
+        v_line_alloc_total := v_line_alloc_total + v_add_qty;
+      END LOOP;  -- allocations
+    END IF;  -- strategy
+
+    -- ⑨ shipping_lines.allocated_qty を明細行ごとの合計で同期
+    UPDATE shipping_lines
+    SET    allocated_qty = v_line_alloc_total
+    WHERE  id = v_line_id;
+
+  END LOOP;  -- lines
 
   RETURN json_build_object('error', NULL::text);
 
@@ -280,7 +413,166 @@ END;
 $$;
 
 COMMENT ON FUNCTION rpc_allocate_shipping_inventory IS
-  '出庫指示登録。shipping_headers/lines/allocations INSERT と inventory.allocated_qty 加算を単一トランザクションで実行する。';
+  '出庫指示登録（フェーズ3-4: FIFO strategy 対応）。'
+  'line JSON の strategy フィールドで引当方式を切り替える: '
+  '  fifo   → received_date ASC でサーバー側 FIFO 自動引当（部分引当許容）'
+  '  manual → フロント選択の allocations を使用（テナント/境界/available チェックあり）'
+  '  未指定 → manual にフォールバック（後方互換）'
+  'すべて単一トランザクション。FEFO 追加時は strategy=fefo ブランチを追加する。';
+
+
+-- =============================================================================
+-- 3. rpc_confirm_shipping_order
+--    出庫確定（inspected → shipped）
+--    inventory の on_hand_qty / allocated_qty を減算し、
+--    inventory_transactions に 'shipping' タイプで記録する。
+--    単一トランザクションで全更新を実行する（フェーズ3-5）。
+-- =============================================================================
+-- 【置き換え対象】
+--   lib/supabase/queries/shippings.ts の confirmShippingOrder()
+--
+-- 【パラメータ】
+--   p_header_id    : shipping_headers.id
+--   p_tenant_id    : tenants.id（スコープ検証用）
+--   p_warehouse_id : warehouses.id（スコープ検証用）
+--
+-- 【shipped_qty の配分ロジック】
+--   各明細の shipped_qty（検品確定値）を引当行に順番に配分する。
+--   v_remaining をデクリメントすることで合計が shipped_qty を超えないよう制御。
+--   allocated_qty は shipped_qty に関わらず全量解放する（予約済み分を常にクリア）。
+--
+-- 【テスト観点（DB 接続が必要なため自動化なし・手動確認）】
+--   1. status = 'inspected' のヘッダーのみ処理可
+--   2. tenant_id / warehouse_id 不一致時は EXCEPTION
+--   3. 全明細完了後に header.status が 'shipped' になる
+--   4. inventory.on_hand_qty / allocated_qty が正しく減算される
+--   5. inventory_transactions に 'shipping' タイプで記録される
+--   6. エラー発生時は中途半端な更新がロールバックされる（トランザクション保証）
+--   7. shipped_qty が 0 の明細は inventory を変更しない
+
+DROP FUNCTION IF EXISTS rpc_confirm_shipping_order(uuid,uuid,uuid);
+
+CREATE OR REPLACE FUNCTION rpc_confirm_shipping_order(
+  p_header_id    uuid,
+  p_tenant_id    uuid,
+  p_warehouse_id uuid
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_line       record;
+  v_alloc      record;
+  v_inv        record;
+  v_remaining  integer;  -- 明細ごとの残り出庫配分数
+  v_deduct     integer;  -- 各引当行から実際に出庫する数量
+BEGIN
+  -- ── Step 1: ヘッダーの存在・スコープ・ステータスチェック ─────
+  PERFORM id
+  FROM    shipping_headers
+  WHERE   id            = p_header_id
+    AND   tenant_id     = p_tenant_id
+    AND   warehouse_id  = p_warehouse_id
+    AND   status        = 'inspected';
+
+  IF NOT FOUND THEN
+    RETURN json_build_object(
+      'error',
+      '出庫指示が見つかりません。スコープ違反か、inspected 状態ではない可能性があります。'
+    );
+  END IF;
+
+  -- ── Step 2: 各明細を処理 ─────────────────────────────────────
+  FOR v_line IN
+    SELECT id, shipped_qty, product_id
+    FROM   shipping_lines
+    WHERE  header_id = p_header_id
+    FOR UPDATE
+  LOOP
+    v_remaining := v_line.shipped_qty;
+
+    -- ── Step 3: 各引当行を処理 ─────────────────────────────────
+    -- ORDER BY id ASC でロック順を固定し deadlock を防ぐ
+    FOR v_alloc IN
+      SELECT sa.inventory_id, sa.allocated_qty
+      FROM   shipping_allocations sa
+      WHERE  sa.line_id = v_line.id
+      ORDER BY sa.id ASC
+    LOOP
+      -- 在庫行を FOR UPDATE でロック
+      SELECT id, tenant_id, warehouse_id, product_id,
+             on_hand_qty, allocated_qty,
+             received_date, lot_no, expiry_date
+      INTO   v_inv
+      FROM   inventory
+      WHERE  id = v_alloc.inventory_id
+      FOR UPDATE;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '在庫行が見つかりません（inventory_id: %）', v_alloc.inventory_id;
+      END IF;
+
+      IF v_inv.tenant_id != p_tenant_id OR v_inv.warehouse_id != p_warehouse_id THEN
+        RAISE EXCEPTION 'テナントまたは倉庫の境界違反（inventory_id: %）', v_inv.id;
+      END IF;
+
+      -- on_hand_qty から出庫する数量: shipped_qty 残余に制限
+      v_deduct := LEAST(v_alloc.allocated_qty, GREATEST(0, v_remaining));
+
+      -- on_hand_qty: 出庫した分だけ減算
+      -- allocated_qty: 引当全量を解放（shipped_qty の過不足に関わらず予約をクリア）
+      UPDATE inventory
+      SET    on_hand_qty   = GREATEST(0, v_inv.on_hand_qty   - v_deduct),
+             allocated_qty = GREATEST(0, v_inv.allocated_qty - v_alloc.allocated_qty)
+      WHERE  id = v_inv.id;
+
+      -- inventory_transactions に出庫イベントを記録（qty_delta は負値）
+      -- shipped_qty=0 の場合も allocated_qty 解放のため deallocation 的に記録する
+      INSERT INTO inventory_transactions (
+        tenant_id,    warehouse_id,    inventory_id,   product_id,
+        transaction_type,
+        qty_delta,
+        before_on_hand_qty,   after_on_hand_qty,
+        before_allocated_qty, after_allocated_qty,
+        received_date,        lot_no,                 expiry_date,
+        reference_type,       reference_id
+      ) VALUES (
+        p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
+        'shipping',
+        -v_deduct,
+        v_inv.on_hand_qty,    GREATEST(0, v_inv.on_hand_qty   - v_deduct),
+        v_inv.allocated_qty,  GREATEST(0, v_inv.allocated_qty - v_alloc.allocated_qty),
+        v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
+        'shipping_line',      v_line.id
+      );
+
+      v_remaining := v_remaining - v_deduct;
+    END LOOP;  -- allocations
+
+    -- 明細ステータスを completed に更新
+    UPDATE shipping_lines
+    SET    status = 'completed'
+    WHERE  id = v_line.id;
+
+  END LOOP;  -- lines
+
+  -- ── Step 4: ヘッダーを shipped に更新 ────────────────────────
+  UPDATE shipping_headers
+  SET    status = 'shipped'
+  WHERE  id = p_header_id;
+
+  RETURN json_build_object('error', NULL::text);
+
+EXCEPTION WHEN others THEN
+  RETURN json_build_object('error', SQLERRM);
+END;
+$$;
+
+COMMENT ON FUNCTION rpc_confirm_shipping_order IS
+  '出庫確定（フェーズ3-5）。inspected → shipped。'
+  'inventory.on_hand_qty を shipped_qty ベースで減算し、allocated_qty を全量解放する。'
+  'inventory_transactions に shipping タイプで記録し、単一トランザクションで実行する。';
 
 
 -- =============================================================================
@@ -376,7 +668,7 @@ BEGIN
     tenant_id, warehouse_id, inventory_id, product_id,
     transaction_type,
     from_location_id, to_location_id,
-    qty,
+    qty_delta,
     before_on_hand_qty, after_on_hand_qty,
     reason, executed_by
   ) VALUES (
@@ -468,7 +760,7 @@ BEGIN
   INSERT INTO inventory_transactions (
     tenant_id, warehouse_id, inventory_id, product_id,
     transaction_type,
-    qty,
+    qty_delta,
     before_on_hand_qty, after_on_hand_qty,
     reason, note, executed_by
   ) VALUES (
@@ -575,7 +867,7 @@ BEGIN
     tenant_id, warehouse_id, inventory_id, product_id,
     transaction_type,
     from_status, to_status,
-    qty,
+    qty_delta,
     before_on_hand_qty, after_on_hand_qty,
     reason, executed_by
   ) VALUES (

@@ -33,6 +33,7 @@ import {
   completeShippingInspection,
   confirmShippingOrder,
 } from '@/lib/supabase/queries/shippings'
+import type { QueryScope } from '@/lib/types'
 import { useTenant } from '@/store/TenantContext'
 import ScopeRequired from '@/components/ui/ScopeRequired'
 
@@ -368,11 +369,13 @@ function InspectionModal({
 
 function ConfirmShippingModal({
   order,
+  scope,
   onClose,
   onUpdated,
 }: {
-  order: ShippingOrderDetail
-  onClose: () => void
+  order:     ShippingOrderDetail
+  scope:     QueryScope
+  onClose:   () => void
   onUpdated: (id: string, status: ShippingStatus) => void
 }) {
   const { t }  = useTranslation('shipping')
@@ -387,7 +390,7 @@ function ConfirmShippingModal({
 
   const handleConfirm = async () => {
     setLoading(true)
-    const { error: err } = await confirmShippingOrder(order.id)
+    const { error: err } = await confirmShippingOrder(order.id, scope)
     setLoading(false)
     if (err) { setError(err); return }
     onUpdated(order.id, 'shipped')
@@ -896,7 +899,7 @@ export default function ShippingPage() {
         const type = getModalType(selectedOrder.status)
         if (type === 'picking')    return <PickingModal    order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
         if (type === 'inspection') return <InspectionModal order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
-        if (type === 'confirm')    return <ConfirmShippingModal order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
+        if (type === 'confirm')    return <ConfirmShippingModal order={selectedOrder} scope={scope!} onClose={handleClose} onUpdated={handleOrderUpdated} />
         return <DetailModal order={selectedOrder} onClose={handleClose} />
       })()}
 

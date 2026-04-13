@@ -10,8 +10,12 @@
 --   1. 本ファイル（schema_current.sql）を全て実行
 --   2. migration_v2.sql を実行（tenants/warehouses 多言語化）
 --   3. migration_v3.sql を実行（lot_no/expiry_date、UNIQUE/CHECK 追加）
---   4. fix_rls.sql を実行（開発用 anon ポリシー）
---   5. dummy_multitenant.sql を実行（テストデータ投入）
+--   4. migration_v4.sql を実行（shipping_lines.allocated_qty 追加、
+--                              inventory_transactions.transaction_type に
+--                              'allocation'/'deallocation' を追加）
+--   5. fix_rls.sql を実行（開発用 anon ポリシー）
+--   6. dummy_multitenant.sql を実行（テストデータ投入）
+--   7. rpc_functions.sql を実行（RPC 関数群を登録・更新）
 -- =============================================================================
 
 
