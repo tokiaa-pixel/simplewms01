@@ -12,7 +12,7 @@
  *   3. computeAllocation() の switch 分岐に 'fefo' を追加
  */
 
-import type { InventoryStatus } from '@/lib/types'
+import type { InventoryStatus, ShippingStatus } from '@/lib/types'
 
 // =============================================================
 // 型定義
@@ -53,6 +53,28 @@ export type AllocationItem = {
  * 将来新しいステータスを追加する場合はこの配列を修正する。
  */
 export const FIFO_ELIGIBLE_STATUSES: InventoryStatus[] = ['available']
+
+/**
+ * 引当解除が許可される出庫指示ステータス。
+ * inspected / shipped / cancelled は解除不可。
+ * RPC（rpc_deallocate_shipping_inventory）でも同じルールをサーバー側で強制する。
+ */
+export const DEALLOC_ELIGIBLE_STATUSES: ShippingStatus[] = ['pending', 'picking']
+
+/**
+ * 引当解除が許可されるステータスかどうかを返す（純粋関数・DB アクセスなし）。
+ *
+ * 【使用場所】
+ *   - UI での解除ボタン表示制御（pending / picking のみ表示）
+ *   - フォーム submit 前の事前チェック
+ *   最終的なチェックは必ず RPC（サーバー側）で行うこと。
+ *
+ * @param status  shipping_headers.status の値
+ * @returns       true = 解除可、false = 解除不可
+ */
+export function isDeallocationAllowed(status: string): boolean {
+  return (DEALLOC_ELIGIBLE_STATUSES as string[]).includes(status)
+}
 
 // =============================================================
 // 純粋関数: FIFO 引当計算

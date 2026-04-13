@@ -3,7 +3,13 @@ import type { InventoryStatus, ShippingStatus, QueryScope } from '@/lib/types'
 
 // 純粋関数・型定義は allocation.ts に分離（Supabase 依存なし・ユニットテスト可能）
 export type { InventoryLine, AllocationItem } from './allocation'
-export { FIFO_ELIGIBLE_STATUSES, computeFifoAllocation, validateManualAllocations } from './allocation'
+export {
+  FIFO_ELIGIBLE_STATUSES,
+  DEALLOC_ELIGIBLE_STATUSES,
+  computeFifoAllocation,
+  validateManualAllocations,
+  isDeallocationAllowed,
+} from './allocation'
 import type { InventoryLine, AllocationItem } from './allocation'
 import { FIFO_ELIGIBLE_STATUSES } from './allocation'
 
@@ -467,8 +473,10 @@ type ShippingLineDetailRaw = {
     unit:            string
   } | null
   shipping_allocations: Array<{
+    id:            string    // shipping_allocations.id（引当解除に使用）
     allocated_qty: number
     inventory: {
+      id:            string  // inventory.id（引当解除に使用）
       locations: { location_code: string } | null
     } | null
   }>
@@ -476,6 +484,8 @@ type ShippingLineDetailRaw = {
 
 /** 棚別引当明細（PickingModal でのピッキングリスト表示に使用） */
 export type ShippingLineAllocation = {
+  id:           string   // shipping_allocations.id
+  inventoryId:  string   // inventory.id
   locationCode: string
   allocatedQty: number
 }
@@ -563,8 +573,9 @@ export async function fetchShippingOrderLines(headerId: string): Promise<{
       id, line_no, requested_qty, shipped_qty,
       products ( product_code, product_name_ja, unit ),
       shipping_allocations (
+        id,
         allocated_qty,
-        inventory ( locations ( location_code ) )
+        inventory ( id, locations ( location_code ) )
       )
     `)
     .eq('header_id', headerId)
@@ -580,6 +591,8 @@ export async function fetchShippingOrderLines(headerId: string): Promise<{
       const allocations: ShippingLineAllocation[] = r.shipping_allocations
         .filter((a) => a.inventory?.locations?.location_code)
         .map((a) => ({
+          id:           a.id,
+          inventoryId:  a.inventory!.id,
           locationCode: a.inventory!.locations!.location_code,
           allocatedQty: Number(a.allocated_qty),
         }))
@@ -661,6 +674,41 @@ export async function confirmShippingOrder(
     p_header_id:    headerId,
     p_tenant_id:    scope.tenantId,
     p_warehouse_id: scope.warehouseId,
+  })
+
+  if (error) return { error: (error as { message: string }).message }
+
+  type RpcResult = { error: string | null }
+  return { error: (data as RpcResult)?.error ?? null }
+}
+
+// =============================================================
+// 引当解除
+// =============================================================
+
+/**
+ * 引当解除処理。pending / picking のヘッダーのみ実行可（RPC 側でチェック）。
+ *
+ * @param headerId     shipping_headers.id（ステータス検証に使用）
+ * @param lineId       shipping_lines.id（解除対象の明細行）
+ * @param allocationId shipping_allocations.id（省略 = lineId の全件解除）
+ * @param scope        tenant_id / warehouse_id（スコープ検証に使用）
+ */
+export async function deallocateShippingInventory(params: {
+  headerId:      string
+  lineId:        string
+  allocationId?: string   // undefined / null → line 全体解除
+  scope:         QueryScope
+}): Promise<{ error: string | null }> {
+  const { headerId, lineId, allocationId, scope } = params
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('rpc_deallocate_shipping_inventory', {
+    p_header_id:     headerId,
+    p_tenant_id:     scope.tenantId,
+    p_warehouse_id:  scope.warehouseId,
+    p_line_id:       lineId,
+    p_allocation_id: allocationId ?? null,
   })
 
   if (error) return { error: (error as { message: string }).message }

@@ -576,6 +576,162 @@ COMMENT ON FUNCTION rpc_confirm_shipping_order IS
 
 
 -- =============================================================================
+-- 4. rpc_deallocate_shipping_inventory
+--    引当解除：shipping_allocations の削除 + inventory.allocated_qty 減算 +
+--    shipping_lines.allocated_qty 減算 + inventory_transactions 記録
+--    を単一トランザクションで実行する。
+-- =============================================================================
+-- 【ステータス制御】
+--   pending / picking  → 解除可
+--   inspected / shipped / cancelled → 解除不可（必ずサーバー側でチェック）
+--
+-- 【パラメータ】
+--   p_header_id     : shipping_headers.id（ステータス検証に使用）
+--   p_tenant_id     : tenants.id（スコープ検証）
+--   p_warehouse_id  : warehouses.id（スコープ検証）
+--   p_line_id       : shipping_lines.id（解除対象の明細行）
+--   p_allocation_id : shipping_allocations.id（NULL = p_line_id 全件解除）
+--
+-- 【対象粒度】
+--   p_allocation_id 指定 → 1 allocation 行のみ解除
+--   p_allocation_id = NULL → p_line_id に紐づく全 allocation を解除
+--
+-- 【inventory_transactions 記録】
+--   transaction_type = 'deallocation'
+--   qty_delta = 0（on_hand_qty は変化なし）
+--   before/after_allocated_qty でトレース可能
+
+DROP FUNCTION IF EXISTS rpc_deallocate_shipping_inventory(uuid,uuid,uuid,uuid,uuid);
+
+CREATE OR REPLACE FUNCTION rpc_deallocate_shipping_inventory(
+  p_header_id     uuid,
+  p_tenant_id     uuid,
+  p_warehouse_id  uuid,
+  p_line_id       uuid,
+  p_allocation_id uuid DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_status text;
+  v_alloc  record;
+  v_inv    record;
+  v_qty    integer;
+BEGIN
+  -- ── Step 1: ヘッダーの存在・スコープ・ステータスチェック ─────────
+  -- FOR UPDATE でロック取得し、並行する picking 開始・確定と競合を防ぐ
+  SELECT status
+  INTO   v_status
+  FROM   shipping_headers
+  WHERE  id           = p_header_id
+    AND  tenant_id    = p_tenant_id
+    AND  warehouse_id = p_warehouse_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN json_build_object(
+      'error',
+      '出庫指示が見つかりません。スコープ違反の可能性があります。'
+    );
+  END IF;
+
+  IF v_status NOT IN ('pending', 'picking') THEN
+    RETURN json_build_object(
+      'error',
+      '引当解除不可のステータスです: ' || v_status
+    );
+  END IF;
+
+  -- ── Step 2: 対象 allocation を順番に処理 ──────────────────────────
+  -- ORDER BY id ASC でロック順を固定し deadlock を防ぐ
+  FOR v_alloc IN
+    SELECT id, inventory_id, allocated_qty
+    FROM   shipping_allocations
+    WHERE  line_id = p_line_id
+      AND  (p_allocation_id IS NULL OR id = p_allocation_id)
+    ORDER BY id ASC
+  LOOP
+    v_qty := v_alloc.allocated_qty;
+
+    -- 在庫行を FOR UPDATE でロック取得
+    SELECT id, tenant_id, warehouse_id, product_id,
+           on_hand_qty, allocated_qty,
+           received_date, lot_no, expiry_date
+    INTO   v_inv
+    FROM   inventory
+    WHERE  id = v_alloc.inventory_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '在庫行が見つかりません（inventory_id: %）', v_alloc.inventory_id;
+    END IF;
+
+    -- テナント/倉庫境界チェック
+    IF v_inv.tenant_id != p_tenant_id OR v_inv.warehouse_id != p_warehouse_id THEN
+      RAISE EXCEPTION 'テナントまたは倉庫の境界違反（inventory_id: %）', v_inv.id;
+    END IF;
+
+    -- allocated_qty がマイナスにならないことを確認
+    IF v_inv.allocated_qty < v_qty THEN
+      RAISE EXCEPTION '在庫整合エラー: allocated_qty が不足しています（inventory_id: %, allocated: %, dealloc: %）',
+        v_inv.id, v_inv.allocated_qty, v_qty;
+    END IF;
+
+    -- ① inventory.allocated_qty を減算
+    UPDATE inventory
+    SET    allocated_qty = v_inv.allocated_qty - v_qty
+    WHERE  id = v_inv.id;
+
+    -- ② inventory_transactions に解除イベントを記録
+    --    on_hand_qty は変化しないため qty_delta = 0
+    --    received_date / lot_no / expiry_date をスナップショットとして保持
+    INSERT INTO inventory_transactions (
+      tenant_id,    warehouse_id,    inventory_id,   product_id,
+      transaction_type,
+      qty_delta,
+      before_on_hand_qty,   after_on_hand_qty,
+      before_allocated_qty, after_allocated_qty,
+      received_date,        lot_no,                 expiry_date,
+      reference_type,       reference_id
+    ) VALUES (
+      p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
+      'deallocation',
+      0,
+      v_inv.on_hand_qty,    v_inv.on_hand_qty,
+      v_inv.allocated_qty,  v_inv.allocated_qty - v_qty,
+      v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
+      'shipping_line',      p_line_id
+    );
+
+    -- ③ shipping_lines.allocated_qty を減算（0 未満にならないようガード）
+    UPDATE shipping_lines
+    SET    allocated_qty = GREATEST(0, allocated_qty - v_qty)
+    WHERE  id = p_line_id;
+
+    -- ④ shipping_allocations から削除
+    DELETE FROM shipping_allocations WHERE id = v_alloc.id;
+
+  END LOOP;
+
+  -- 対象 allocation が 0 件の場合も冪等に成功を返す
+
+  RETURN json_build_object('error', NULL::text);
+
+EXCEPTION WHEN others THEN
+  RETURN json_build_object('error', SQLERRM);
+END;
+$$;
+
+COMMENT ON FUNCTION rpc_deallocate_shipping_inventory IS
+  '引当解除。pending / picking ステータスのみ解除可（サーバー側で強制チェック）。'
+  'p_allocation_id 指定時は1件解除、NULL 時は p_line_id の全 allocation を解除。'
+  'inventory.allocated_qty 減算 + inventory_transactions(deallocation) + '
+  'shipping_lines.allocated_qty 減算 + shipping_allocations 削除を単一トランザクションで実行。';
+
+
+-- =============================================================================
 -- 既存 RPC 関数の補完（未作成の場合に備えて定義）
 -- =============================================================================
 -- rpc_move_inventory / rpc_adjust_inventory / rpc_change_inventory_status は

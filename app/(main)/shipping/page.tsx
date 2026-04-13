@@ -11,6 +11,7 @@ import {
   ScanLine,
   Loader2,
   AlertCircle,
+  Trash2,
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
@@ -32,6 +33,7 @@ import {
   startPickingShipping,
   completeShippingInspection,
   confirmShippingOrder,
+  deallocateShippingInventory,
 } from '@/lib/supabase/queries/shippings'
 import type { QueryScope } from '@/lib/types'
 import { useTenant } from '@/store/TenantContext'
@@ -69,27 +71,43 @@ function ShippingStatusBadge({ status }: { status: ShippingStatus }) {
 
 function PickingModal({
   order,
+  scope,
   onClose,
   onUpdated,
+  onItemsReloaded,
 }: {
-  order: ShippingOrderDetail
-  onClose: () => void
-  onUpdated: (id: string, status: ShippingStatus) => void
+  order:           ShippingOrderDetail
+  scope:           QueryScope
+  onClose:         () => void
+  onUpdated:       (id: string, status: ShippingStatus) => void
+  onItemsReloaded: (id: string) => Promise<void>
 }) {
   const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
   const [done,    setDone]    = useState(false)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
+  const [deallocatingId, setDeallocatingId] = useState<string | null>(null)
 
   // 引当行を棚番順に1行ずつ展開（ピッキングルート順）
   // allocations がある場合は棚ごとに1行、ない場合は item をそのまま1行にフォールバック
-  type PickRow = { key: string; locationCode: string; productCode: string; productName: string; unit: string; qty: number }
+  type PickRow = {
+    key:          string
+    allocationId: string | null   // shipping_allocations.id（解除ボタンに使用）
+    lineId:       string          // shipping_lines.id
+    locationCode: string
+    productCode:  string
+    productName:  string
+    unit:         string
+    qty:          number
+  }
   const pickingRows: PickRow[] = order.items
     .flatMap((item): PickRow[] => {
       if (item.allocations.length > 0) {
         return item.allocations.map((alloc: ShippingLineAllocation) => ({
-          key:         `${item.id}-${alloc.locationCode}`,
+          key:          `${item.id}-${alloc.locationCode}`,
+          allocationId: alloc.id,
+          lineId:       item.id,
           locationCode: alloc.locationCode,
           productCode:  item.productCode,
           productName:  item.productName,
@@ -98,7 +116,9 @@ function PickingModal({
         }))
       }
       return [{
-        key:         item.id,
+        key:          item.id,
+        allocationId: null,
+        lineId:       item.id,
         locationCode: item.locationCode || '—',
         productCode:  item.productCode,
         productName:  item.productName,
@@ -107,6 +127,21 @@ function PickingModal({
       }]
     })
     .sort((a, b) => a.locationCode.localeCompare(b.locationCode))
+
+  const handleDealloc = async (row: PickRow) => {
+    if (!row.allocationId) return
+    setDeallocatingId(row.allocationId)
+    setError('')
+    const { error: err } = await deallocateShippingInventory({
+      headerId:     order.id,
+      lineId:       row.lineId,
+      allocationId: row.allocationId,
+      scope,
+    })
+    setDeallocatingId(null)
+    if (err) { setError(err); return }
+    await onItemsReloaded(order.id)
+  }
 
   const handleStart = async () => {
     setLoading(true)
@@ -169,6 +204,7 @@ function PickingModal({
                   <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
                   <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
                   <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDone')}</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -187,6 +223,21 @@ function PickingModal({
                     </td>
                     <td className="px-4 py-3 text-center">
                       <input type="checkbox" className="w-4 h-4 accent-blue-600" />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {row.allocationId && (
+                        <button
+                          onClick={() => handleDealloc(row)}
+                          disabled={deallocatingId !== null}
+                          title="引当解除"
+                          className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-40 transition-colors"
+                        >
+                          {deallocatingId === row.allocationId
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <Trash2 size={13} />
+                          }
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -223,21 +274,39 @@ function PickingModal({
 
 function InspectionModal({
   order,
+  scope,
   onClose,
   onUpdated,
+  onItemsReloaded,
 }: {
-  order: ShippingOrderDetail
-  onClose: () => void
-  onUpdated: (id: string, status: ShippingStatus, updatedItems: ShippingLineItem[]) => void
+  order:           ShippingOrderDetail
+  scope:           QueryScope
+  onClose:         () => void
+  onUpdated:       (id: string, status: ShippingStatus, updatedItems: ShippingLineItem[]) => void
+  onItemsReloaded: (id: string) => Promise<void>
 }) {
   const { t }  = useTranslation('shipping')
   const { t: tc } = useTranslation('common')
   const [pickedQty, setPickedQty] = useState<Record<string, string>>(
     () => Object.fromEntries(order.items.map((i) => [i.id, String(i.orderedQuantity)]))
   )
-  const [error,   setError]   = useState('')
-  const [loading, setLoading] = useState(false)
-  const [done,    setDone]    = useState(false)
+  const [error,         setError]         = useState('')
+  const [loading,       setLoading]       = useState(false)
+  const [done,          setDone]          = useState(false)
+  const [deallocatingLineId, setDeallocatingLineId] = useState<string | null>(null)
+
+  const handleDeallocLine = async (lineId: string) => {
+    setDeallocatingLineId(lineId)
+    setError('')
+    const { error: err } = await deallocateShippingInventory({
+      headerId: order.id,
+      lineId,
+      scope,    // allocationId 省略 → line 全件解除
+    })
+    setDeallocatingLineId(null)
+    if (err) { setError(err); return }
+    await onItemsReloaded(order.id)
+  }
 
   const handleComplete = async () => {
     for (const item of order.items) {
@@ -307,6 +376,7 @@ function InspectionModal({
                 <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
                 <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyActual')}</th>
                 <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDiff')}</th>
+                <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -334,6 +404,21 @@ function InspectionModal({
                         <span className={`font-medium ${diff < 0 ? 'text-red-500' : 'text-blue-500'}`}>
                           {diff > 0 ? '+' : ''}{diff}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {item.allocations.length > 0 && (
+                        <button
+                          onClick={() => handleDeallocLine(item.id)}
+                          disabled={deallocatingLineId !== null}
+                          title="この明細の引当を全解除"
+                          className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-40 transition-colors"
+                        >
+                          {deallocatingLineId === item.id
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <Trash2 size={13} />
+                          }
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -674,6 +759,16 @@ export default function ShippingPage() {
   // ── モーダルを閉じる ─────────────────────────────────────────
   const handleClose = () => setSelectedId(null)
 
+  // ── 引当解除後に明細を再ロード ───────────────────────────────
+  const handleReloadItems = useCallback(async (id: string) => {
+    const { data } = await fetchShippingOrderLines(id)
+    if (data) {
+      setOrders((prev) =>
+        prev.map((o) => o.id === id ? { ...o, items: data, itemsLoaded: true } : o)
+      )
+    }
+  }, [])
+
   // ── 集計 ─────────────────────────────────────────────────────
   const counts = useMemo(() => ({
     pending:   orders.filter((o) => o.status === 'pending').length,
@@ -897,8 +992,8 @@ export default function ShippingPage() {
       {/* モーダル */}
       {selectedOrder && !modalLoading && (() => {
         const type = getModalType(selectedOrder.status)
-        if (type === 'picking')    return <PickingModal    order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
-        if (type === 'inspection') return <InspectionModal order={selectedOrder} onClose={handleClose} onUpdated={handleOrderUpdated} />
+        if (type === 'picking')    return <PickingModal    order={selectedOrder} scope={scope!} onClose={handleClose} onUpdated={handleOrderUpdated} onItemsReloaded={handleReloadItems} />
+        if (type === 'inspection') return <InspectionModal order={selectedOrder} scope={scope!} onClose={handleClose} onUpdated={handleOrderUpdated} onItemsReloaded={handleReloadItems} />
         if (type === 'confirm')    return <ConfirmShippingModal order={selectedOrder} scope={scope!} onClose={handleClose} onUpdated={handleOrderUpdated} />
         return <DetailModal order={selectedOrder} onClose={handleClose} />
       })()}
