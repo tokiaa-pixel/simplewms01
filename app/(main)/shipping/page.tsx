@@ -16,6 +16,7 @@ import {
   Zap,
   Hand,
   X,
+  XCircle,
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
@@ -42,7 +43,9 @@ import {
   confirmShippingOrder,
   deallocateShippingInventory,
   reallocateShippingLine,
+  cancelShippingOrder,
   isReallocationAllowed,
+  isCancellationAllowed,
 } from '@/lib/supabase/queries/shippings'
 import type { QueryScope } from '@/lib/types'
 import { INVENTORY_STATUS_CONFIG } from '@/lib/types'
@@ -959,7 +962,110 @@ function ConfirmShippingModal({
 }
 
 // =============================================================
-// ④ 詳細モーダル（shipped / cancelled）
+// ④ キャンセル確認モーダル
+// =============================================================
+
+function CancelModal({
+  order,
+  scope,
+  onClose,
+  onCancelled,
+}: {
+  order:       ShippingOrderSummary
+  scope:       QueryScope
+  onClose:     () => void
+  onCancelled: (id: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
+  const [done,    setDone]    = useState(false)
+
+  // picking / inspected はピッキング・梱包作業が進行している可能性があるため強い警告を出す
+  const isWarning = order.status === 'picking' || order.status === 'inspected'
+
+  const handleCancel = async () => {
+    setLoading(true)
+    setError('')
+    const { error: err } = await cancelShippingOrder({ headerId: order.id, scope })
+    setLoading(false)
+    if (err) { setError(err); return }
+    onCancelled(order.id)
+    setDone(true)
+  }
+
+  if (done) {
+    return (
+      <Modal title="出庫指示のキャンセル" onClose={onClose} size="sm">
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <XCircle size={40} className="text-red-400" />
+          <p className="text-sm font-semibold text-slate-700">キャンセルしました</p>
+          <p className="text-xs text-slate-500">{order.code}</p>
+          <button onClick={onClose}
+            className="mt-3 px-6 py-2 bg-brand-navy text-white text-sm font-medium rounded-md hover:bg-brand-navy-mid transition-colors">
+            閉じる
+          </button>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title="出庫指示のキャンセル" onClose={onClose} size="sm">
+      <div className="space-y-4">
+        {/* 対象注文の概要 */}
+        <div className="bg-slate-50 rounded-lg px-4 py-3 space-y-1.5">
+          {([
+            ['出庫番号', <span key="code" className="font-mono font-medium text-slate-800">{order.code}</span>],
+            ['得意先',   order.customerName],
+            ['ステータス', <ShippingStatusBadge key="st" status={order.status} />],
+          ] as [string, React.ReactNode][]).map(([label, value], i) => (
+            <div key={i} className="flex items-center gap-2">
+              <dt className="text-xs text-slate-500 w-20 flex-shrink-0">{label}</dt>
+              <dd className="text-xs font-medium">{value}</dd>
+            </div>
+          ))}
+        </div>
+
+        {/* picking / inspected 向け強い警告 */}
+        {isWarning ? (
+          <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2.5 flex items-start gap-2 text-xs text-amber-700">
+            <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+            <span>
+              {order.status === 'picking' ? 'ピッキング中' : '検品済み'}のため、
+              <strong>現場に作業中止を連絡してください。</strong>
+              キャンセル後、引当済みの在庫はすべて解放されます。
+            </span>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-600">
+            この出庫指示をキャンセルします。引当済みの在庫はすべて解放されます。
+          </p>
+        )}
+
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <AlertCircle size={12} /> {error}
+          </p>
+        )}
+
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-1 border-t border-slate-100">
+          <button onClick={onClose}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+            戻る
+          </button>
+          <button onClick={handleCancel} disabled={loading}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-2 text-sm text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+            この出庫指示をキャンセルする
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// =============================================================
+// ⑤ 詳細モーダル（shipped / cancelled）
 // =============================================================
 
 function DetailModal({
@@ -1069,6 +1175,7 @@ export default function ShippingPage() {
   const [search,          setSearch]          = useState(() => searchParams.get('q') ?? '')
   const [selectedId,      setSelectedId]      = useState<string | null>(null)
   const [modalLoading,    setModalLoading]    = useState(false)
+  const [cancelTarget,    setCancelTarget]    = useState<ShippingOrderSummary | null>(null)
 
   // ── URL 更新ヘルパー（history を積まない replace）──────────
   const pushParams = useCallback((q: string, tab: ShippingTabValue) => {
@@ -1141,6 +1248,14 @@ export default function ShippingPage() {
 
   // ── モーダルを閉じる ─────────────────────────────────────────
   const handleClose = () => setSelectedId(null)
+
+  // ── キャンセル完了後の状態更新 ──────────────────────────────
+  const handleOrderCancelled = useCallback((id: string) => {
+    setOrders((prev) =>
+      prev.map((o) => o.id !== id ? o : { ...o, status: 'cancelled' as ShippingStatus })
+    )
+    setCancelTarget(null)
+  }, [])
 
   // ── 引当解除後に明細を再ロード ───────────────────────────────
   const handleReloadItems = useCallback(async (id: string) => {
@@ -1296,10 +1411,21 @@ export default function ShippingPage() {
                     <span className="text-xs text-slate-500">
                       {order.requestedDate} / {order.lineCount} {t('cardItemUnit')}
                     </span>
-                    <button onClick={() => handleSelectOrder(order.id)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${nextActionStyle}`}>
-                      {actionLabels[modalType]}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleSelectOrder(order.id)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${nextActionStyle}`}>
+                        {actionLabels[modalType]}
+                      </button>
+                      {isCancellationAllowed(order.status) && (
+                        <button
+                          onClick={() => { setSelectedId(null); setCancelTarget(order) }}
+                          title="出庫キャンセル"
+                          className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded"
+                        >
+                          <XCircle size={15} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
@@ -1348,10 +1474,21 @@ export default function ShippingPage() {
                       </td>
                       <td className="px-4 py-3"><ShippingStatusBadge status={order.status} /></td>
                       <td className="px-4 py-3">
-                        <button onClick={() => handleSelectOrder(order.id)}
-                          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${btnStyle}`}>
-                          {actionLabels[modalType]}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => handleSelectOrder(order.id)}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${btnStyle}`}>
+                            {actionLabels[modalType]}
+                          </button>
+                          {isCancellationAllowed(order.status) && (
+                            <button
+                              onClick={() => { setSelectedId(null); setCancelTarget(order) }}
+                              title="出庫キャンセル"
+                              className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded"
+                            >
+                              <XCircle size={14} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1372,7 +1509,7 @@ export default function ShippingPage() {
         </div>
       )}
 
-      {/* モーダル */}
+      {/* 操作モーダル（ピッキング / 検品 / 出荷確定 / 詳細） */}
       {selectedOrder && !modalLoading && (() => {
         const type = getModalType(selectedOrder.status)
         if (type === 'picking')    return <PickingModal    order={selectedOrder} scope={scope!} onClose={handleClose} onUpdated={handleOrderUpdated} onItemsReloaded={handleReloadItems} />
@@ -1380,6 +1517,16 @@ export default function ShippingPage() {
         if (type === 'confirm')    return <ConfirmShippingModal order={selectedOrder} scope={scope!} onClose={handleClose} onUpdated={handleOrderUpdated} />
         return <DetailModal order={selectedOrder} onClose={handleClose} />
       })()}
+
+      {/* キャンセル確認モーダル */}
+      {cancelTarget && scope && (
+        <CancelModal
+          order={cancelTarget}
+          scope={scope}
+          onClose={() => setCancelTarget(null)}
+          onCancelled={handleOrderCancelled}
+        />
+      )}
 
       {/* ts unused var suppression */}
       <span className="hidden">{ts('shipping_pending')}</span>

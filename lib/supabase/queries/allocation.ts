@@ -97,6 +97,29 @@ export function isReallocationAllowed(status: string): boolean {
   return (REALLOC_ELIGIBLE_STATUSES as string[]).includes(status)
 }
 
+/**
+ * キャンセルが許可される出庫指示ステータス。
+ * pending / picking / inspected → 可（在庫は物理的にまだ倉庫にある）
+ * shipped → 不可（on_hand_qty 減算済み。別途入庫処理が必要）
+ * cancelled → 不可（冪等処理は RPC 側で行うため UI から操作不要）
+ * RPC（rpc_cancel_shipping_order）でも同じルールをサーバー側で強制する。
+ */
+export const CANCEL_ELIGIBLE_STATUSES: ShippingStatus[] = ['pending', 'picking', 'inspected']
+
+/**
+ * キャンセルが許可されるステータスかどうかを返す（純粋関数・DB アクセスなし）。
+ *
+ * 【使用場所】
+ *   - UI でのキャンセルボタン表示制御
+ *   最終的なチェックは必ず RPC（サーバー側）で行うこと。
+ *
+ * @param status  shipping_headers.status の値
+ * @returns       true = キャンセル可、false = キャンセル不可
+ */
+export function isCancellationAllowed(status: string): boolean {
+  return (CANCEL_ELIGIBLE_STATUSES as string[]).includes(status)
+}
+
 // =============================================================
 // 純粋関数: FIFO 引当計算
 // =============================================================

@@ -7,10 +7,12 @@ export {
   FIFO_ELIGIBLE_STATUSES,
   DEALLOC_ELIGIBLE_STATUSES,
   REALLOC_ELIGIBLE_STATUSES,
+  CANCEL_ELIGIBLE_STATUSES,
   computeFifoAllocation,
   validateManualAllocations,
   isDeallocationAllowed,
   isReallocationAllowed,
+  isCancellationAllowed,
 } from './allocation'
 import type { InventoryLine, AllocationItem } from './allocation'
 import { FIFO_ELIGIBLE_STATUSES } from './allocation'
@@ -714,6 +716,43 @@ export async function deallocateShippingInventory(params: {
     p_warehouse_id:  scope.warehouseId,
     p_line_id:       lineId,
     p_allocation_id: allocationId ?? null,
+  })
+
+  if (error) return { error: (error as { message: string }).message }
+
+  type RpcResult = { error: string | null }
+  return { error: (data as RpcResult)?.error ?? null }
+}
+
+// =============================================================
+// 出荷キャンセル
+// =============================================================
+
+/**
+ * 出荷キャンセル処理。pending / picking / inspected のヘッダーのみ実行可（RPC 側でチェック）。
+ * 全 allocation を解除し inventory.allocated_qty を戻す（on_hand_qty は変化なし）。
+ * 解除 → shipping_lines キャンセル → shipping_headers キャンセルを単一トランザクションで実行。
+ *
+ * @param headerId  shipping_headers.id
+ * @param reason    キャンセル理由（任意。inventory_transactions.note に記録）
+ * @param scope     tenant_id / warehouse_id（スコープ検証に使用）
+ *
+ * shipped はキャンセル不可（RPC がエラーを返す）。
+ * cancelled 済みは冪等 success（RPC がそのまま成功を返す）。
+ */
+export async function cancelShippingOrder(params: {
+  headerId: string
+  reason?:  string
+  scope:    QueryScope
+}): Promise<{ error: string | null }> {
+  const { headerId, reason, scope } = params
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('rpc_cancel_shipping_order', {
+    p_header_id:    headerId,
+    p_tenant_id:    scope.tenantId,
+    p_warehouse_id: scope.warehouseId,
+    p_reason:       reason ?? null,
   })
 
   if (error) return { error: (error as { message: string }).message }

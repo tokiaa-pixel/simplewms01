@@ -11,7 +11,8 @@
 - 引当解除（`rpc_deallocate_shipping_inventory`）✅ 2026-04-13 完了
 - 再引当 FIFO（`rpc_reallocate_shipping_line`）✅ 2026-04-14 完了
 - 出荷確定（`rpc_confirm_shipping_order`）
-- inventory_transactions への全操作記録（allocation / deallocation / reallocation / shipping）
+- 出荷キャンセル（`rpc_cancel_shipping_order`）✅ 2026-04-14 完了
+- inventory_transactions への全操作記録（allocation / deallocation / reallocation / shipping / cancel）
 - ロット・賞味期限管理の基本設計
 - マルチテナント（テナント + 倉庫スコープ）
 
@@ -51,6 +52,21 @@
 - UI: PickingModal（pending）に `RefreshCw` 再引当ボタン追加
 - 純粋関数 `isReallocationAllowed(status)` + `REALLOC_ELIGIBLE_STATUSES` 追加
 - 設計ドキュメント: `docs/reallocation-design.md`
+
+### 3-G: 出荷キャンセル RPC ✅ 完了（2026-04-14）
+
+`rpc_cancel_shipping_order` 実装済み。
+
+- `pending` / `picking` / `inspected` → `cancelled`（サーバー側で強制チェック）
+- `shipped` はキャンセル不可（`on_hand_qty` 減算済み）
+- `cancelled` 済みは冪等: 即 `{ error: null }` を返す
+- 全 shipping_allocations を削除し `inventory.allocated_qty` を原子的に戻す
+- `on_hand_qty` は変化なし（物品は倉庫に留まる）
+- inventory_transactions に `deallocation` タイプ・`note=reason:cancel[:<p_reason>]` で記録
+- `FOR UPDATE` + `ORDER BY id ASC` で TOCTOU・デッドロック両方を防止
+- UI: `XCircle` ボタン + `CancelModal`（`picking`/`inspected` に警告表示）
+- 純粋関数 `isCancellationAllowed(status)` + `CANCEL_ELIGIBLE_STATUSES` 追加
+- 設計ドキュメント: `docs/shipping-cancel-design.md`
 
 ### 3-C: 出荷確定 RPC ✅ 完了
 
@@ -141,6 +157,7 @@ DataTable 統一化のタイミングで TanStack Table の導入を再評価す
 | 3-D | inventory_transactions | ~~高~~ | ✅ 完了 |
 | 3-E | 移動・調整・変更 RPC 強化 | 中 | 部分実装 |
 | 3-F | 再引当 RPC（FIFO） | ~~高~~ | ✅ 完了（2026-04-14） |
+| 3-G | 出荷キャンセル RPC | ~~高~~ | ✅ 完了（2026-04-14） |
 | 4-A | FEFO 引当 | 中 | 未実装 |
 | 4-B | 賞味期限アラート | 中 | 未実装 |
 | 4-C | 期限切れ自動変更 | 低 | 未実装 |
@@ -157,6 +174,8 @@ DataTable 統一化のタイミングで TanStack Table の導入を再評価す
 | Supabase Auth がダミー認証 | セキュリティ | 本番前に必ず RLS + 正規認証に切り替え |
 | `allocated_qty` CHECK 制約が NOT VALID | データ整合性 | 既存データ検証後 `VALIDATE CONSTRAINT` |
 | 手動再引当（在庫指定）が未実装（現状は FIFO のみ） | UX | 4-D で手動再引当 RPC を実装 |
+| キャンセルが header 単位のみ（line 単位不可） | UX | 将来 `rpc_cancel_shipping_line` を追加（部分キャンセル設計が必要） |
+| `shipped` 済みのキャンセル（返品）が未実装 | UX | 返品入庫フロー（`transaction_type='return'`）として別途設計 |
 | 移動・調整 RPC の inventory_transactions 記録が不完全 | 監査ログ | 3-E 対応 |
 | モバイル対応が部分的（shipping 未対応） | UX | フェーズ4 完了後に対応 |
 
