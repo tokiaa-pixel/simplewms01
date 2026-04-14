@@ -281,9 +281,51 @@ function PickingModal({
               </table>
             </div>
           ) : (
-            <div className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-6 text-center">
-              <p className="text-sm font-medium text-amber-700">引当がないためピッキング対象がありません</p>
-              <p className="text-xs text-amber-600 mt-1">先に出庫指示の引当を設定してください</p>
+            // 引当なし: empty state を表示しつつ、未処理なら明細ごとに再引当ボタンを残す
+            <div className="space-y-2">
+              <div className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-4 text-center">
+                <p className="text-sm font-medium text-amber-700">引当がないためピッキング対象がありません</p>
+                <p className="text-xs text-amber-600 mt-1">再引当で在庫を割り当ててください</p>
+              </div>
+              {canReallocate && (
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductCode')}</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-slate-500">{t('tblProductName')}</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
+                        <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {order.items.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 font-mono text-blue-600">{item.productCode}</td>
+                          <td className="px-4 py-3 text-slate-700">{item.productName}</td>
+                          <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                            {item.orderedQuantity}
+                            <span className="text-slate-400 font-normal ml-1">{item.unit}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              onClick={() => handleReallocLine(item.id)}
+                              disabled={deallocatingId !== null || reallocatingLineId !== null}
+                              title="FIFO 再引当"
+                              className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
+                            >
+                              {reallocatingLineId === item.id
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <RefreshCw size={13} />
+                              }
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
