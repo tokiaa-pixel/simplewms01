@@ -143,6 +143,19 @@ export const en: Translations = {
     filterCompleted:    'Completed',
     filterCancelled:    'Cancelled',
     empty:              'No arrival schedules found',
+    // edit
+    modalEditTitle:         'Edit Arrival Schedule',
+    lotNo:                  'Lot No.',
+    expiryDate:             'Expiry Date',
+    lotNoPlaceholder:       'Lot No. (optional)',
+    expiryDatePlaceholder:  'Expiry Date (optional)',
+    lineMemoPlaceholder:    'Note (optional)',
+    tblLotNo:               'Lot No.',
+    tblExpiryDate:          'Expiry Date',
+    tblMemo:                'Note',
+    errConflict:            'This record was updated by another operation. Please reload.',
+    errReceivedExists:      'Cannot edit: some lines have already been received.',
+    editNotAllowed:         'Cannot edit: receiving has already started.',
   },
 
   receiving: {

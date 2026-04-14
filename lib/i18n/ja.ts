@@ -143,6 +143,19 @@ export const ja: Translations = {
     filterCompleted:    '入庫完了',
     filterCancelled:    'キャンセル',
     empty:              '該当する入荷予定がありません',
+    // 編集
+    modalEditTitle:         '入荷予定編集',
+    lotNo:                  'ロット番号',
+    expiryDate:             '有効期限',
+    lotNoPlaceholder:       'ロット番号（任意）',
+    expiryDatePlaceholder:  '有効期限（任意）',
+    lineMemoPlaceholder:    '備考（任意）',
+    tblLotNo:               'ロット番号',
+    tblExpiryDate:          '有効期限',
+    tblMemo:                '備考',
+    errConflict:            '他の操作で更新されています。画面を再読み込みしてください。',
+    errReceivedExists:      '入庫済みの明細があるため編集できません。',
+    editNotAllowed:         '入庫処理が開始されているため編集できません。',
   },
 
   receiving: {

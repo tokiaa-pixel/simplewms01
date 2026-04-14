@@ -19,6 +19,7 @@ type HeaderRaw = {
   status:       string
   memo:         string | null
   created_at:   string
+  updated_at:   string
   suppliers: { supplier_name_ja: string } | null
   arrival_lines: LineRaw[]
 }
@@ -67,9 +68,11 @@ export type ArrivalGroup = {
   supplierId:   string
   supplierName: string
   arrivalDate:  string
+  arrivalDateRaw: string   // YYYY-MM-DD（編集フォームの初期値用）
   status:       ArrivalStatus  // lines から導出
   lines:        ArrivalLineItem[]
   createdAt:    string
+  updatedAt:    string   // ISO timestamptz 生値（楽観的ロック用）
   memo:         string | null
 }
 
@@ -77,6 +80,15 @@ export type ArrivalGroup = {
 export type SupplierOption = { id: string; code: string; name: string }
 export type ProductOption  = { id: string; code: string; name: string; unit: string }
 export type LocationOption = { id: string; code: string; name: string }
+
+/** 入荷予定編集フォームの明細1行 */
+export type EditLineInput = {
+  productId:   string
+  plannedQty:  number
+  lotNo:       string | null
+  expiryDate:  string | null   // YYYY-MM-DD or null
+  memo:        string | null
+}
 
 // =============================================================
 // 内部ユーティリティ
@@ -128,7 +140,7 @@ export async function fetchArrivalGroups(scope: QueryScope): Promise<{
   const { data, error } = await supabase
     .from('arrival_headers')
     .select(`
-      id, arrival_no, supplier_id, arrival_date, status, memo, created_at,
+      id, arrival_no, supplier_id, arrival_date, status, memo, created_at, updated_at,
       suppliers ( supplier_name_ja ),
       arrival_lines (
         id, line_no, product_id, planned_qty, received_qty,
@@ -191,15 +203,17 @@ export async function fetchArrivalGroups(scope: QueryScope): Promise<{
     )
 
     return {
-      id:           h.id,
-      arrivalNo:    h.arrival_no,
-      supplierId:   h.supplier_id,
-      supplierName: h.suppliers?.supplier_name_ja ?? '',
-      arrivalDate:  formatDate(h.arrival_date),
-      status:       toArrivalStatus(rawStatus),
+      id:             h.id,
+      arrivalNo:      h.arrival_no,
+      supplierId:     h.supplier_id,
+      supplierName:   h.suppliers?.supplier_name_ja ?? '',
+      arrivalDate:    formatDate(h.arrival_date),
+      arrivalDateRaw: h.arrival_date,   // YYYY-MM-DD のまま保持
+      status:         toArrivalStatus(rawStatus),
       lines,
-      createdAt:    formatDate(h.created_at),
-      memo:         h.memo,
+      createdAt:      formatDate(h.created_at),
+      updatedAt:      h.updated_at,     // ISO timestamptz 生値
+      memo:           h.memo,
     }
   })
 
@@ -356,4 +370,47 @@ export async function createArrivalBatch(params: {
   if (linesErr) return { error: `明細登録エラー: ${linesErr.message}` }
 
   return { error: null }
+}
+
+// =============================================================
+// 入荷予定編集（header 更新 + lines 全削除 + lines 全挿入）
+// =============================================================
+
+export async function updateArrival(params: {
+  headerId:            string
+  arrivalDate:         string        // YYYY-MM-DD
+  memo:                string | null
+  expectedUpdatedAt:   string        // ISO timestamptz（楽観的ロック用）
+  lines:               EditLineInput[]
+  scope:               QueryScope
+}): Promise<{ error: string | null }> {
+  const { headerId, arrivalDate, memo, expectedUpdatedAt, lines, scope } = params
+
+  // ライン数チェック（クライアント側事前バリデーション）
+  if (lines.length === 0) return { error: '明細を1件以上入力してください' }
+
+  // JSON に変換して RPC に渡す
+  const linesJson = lines.map((l, idx) => ({
+    line_no:    idx + 1,
+    product_id: l.productId,
+    planned_qty: l.plannedQty,
+    lot_no:      l.lotNo    ?? null,
+    expiry_date: l.expiryDate ?? null,
+    memo:        l.memo     ?? null,
+  }))
+
+  const { data, error } = await (supabase as any).rpc('rpc_update_arrival', {
+    p_header_id:           headerId,
+    p_tenant_id:           scope.tenantId,
+    p_warehouse_id:        scope.warehouseId,
+    p_arrival_date:        arrivalDate,
+    p_memo:                memo ?? null,
+    p_expected_updated_at: expectedUpdatedAt,
+    p_lines:               JSON.stringify(linesJson),
+  })
+
+  if (error) return { error: (error as { message: string }).message }
+
+  type RpcResult = { error: string | null }
+  return { error: (data as RpcResult)?.error ?? null }
 }

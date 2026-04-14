@@ -142,6 +142,19 @@ export interface Translations {
     filterCompleted: string
     filterCancelled: string
     empty: string
+    // 編集
+    modalEditTitle: string
+    lotNo: string
+    expiryDate: string
+    lotNoPlaceholder: string
+    expiryDatePlaceholder: string
+    lineMemoPlaceholder: string
+    tblLotNo: string
+    tblExpiryDate: string
+    tblMemo: string
+    errConflict: string
+    errReceivedExists: string
+    editNotAllowed: string
   }
   receiving: {
     title: string
