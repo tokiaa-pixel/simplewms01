@@ -138,7 +138,7 @@ export async function fetchArrivalGroups(scope: QueryScope): Promise<{
     `)
     .eq('tenant_id',    scope.tenantId)
     .eq('warehouse_id', scope.warehouseId)
-    .order('arrival_date', { ascending: false })
+    .order('arrival_no', { ascending: true })
 
   if (error) return { data: [], error: error.message }
 
