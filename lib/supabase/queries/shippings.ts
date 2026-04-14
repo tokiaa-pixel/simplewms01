@@ -470,6 +470,7 @@ type ShippingLineDetailRaw = {
   requested_qty: number
   shipped_qty:   number
   products: {
+    id:              string   // products.id（手動再引当時の在庫取得に使用）
     product_code:    string
     product_name_ja: string
     unit:            string
@@ -496,6 +497,7 @@ export type ShippingLineAllocation = {
 export type ShippingLineItem = {
   id:             string   // shipping_lines.id
   lineNo:         number
+  productId:      string   // products.id（手動再引当時の在庫取得に使用）
   productCode:    string
   productName:    string
   unit:           string
@@ -573,7 +575,7 @@ export async function fetchShippingOrderLines(headerId: string): Promise<{
     .from('shipping_lines')
     .select(`
       id, line_no, requested_qty, shipped_qty,
-      products ( product_code, product_name_ja, unit ),
+      products ( id, product_code, product_name_ja, unit ),
       shipping_allocations (
         id,
         allocated_qty,
@@ -606,6 +608,7 @@ export async function fetchShippingOrderLines(headerId: string): Promise<{
       return {
         id:             r.id,
         lineNo:         r.line_no,
+        productId:      r.products?.id              ?? '',
         productCode:    r.products?.product_code    ?? '',
         productName:    r.products?.product_name_ja ?? '',
         unit:           r.products?.unit            ?? '',
@@ -724,21 +727,32 @@ export async function deallocateShippingInventory(params: {
 // =============================================================
 
 /**
- * 再引当処理（FIFO）。pending ステータスのヘッダーのみ実行可（RPC 側でチェック）。
- * 対象 line の既存引当を全解除し、FIFO で新規引当を行う。
+ * 再引当処理（FIFO / 手動）。pending ステータスのヘッダーのみ実行可（RPC 側でチェック）。
+ * 対象 line の既存引当を全解除し、指定戦略で新規引当を行う。
  * 解除→引当は単一トランザクションで原子的に実行される。
- * 在庫不足時は全体ロールバック（旧引当も復元される）。
  *
- * @param headerId shipping_headers.id（ステータス検証に使用）
- * @param lineId   shipping_lines.id（再引当対象の明細行）
- * @param scope    tenant_id / warehouse_id（スコープ検証に使用）
+ * @param headerId    shipping_headers.id（ステータス検証に使用）
+ * @param lineId      shipping_lines.id（再引当対象の明細行）
+ * @param strategy    'fifo'（デフォルト）| 'manual'
+ * @param allocations 手動引当時の引当配列（strategy='fifo' の場合は不要）
+ * @param scope       tenant_id / warehouse_id（スコープ検証に使用）
+ *
+ * FIFO: 在庫不足時は全体ロールバック（旧引当も復元される）
+ * MANUAL: 部分引当許容。各在庫行の available_qty 超過は RPC でエラー返却。
  */
 export async function reallocateShippingLine(params: {
-  headerId: string
-  lineId:   string
-  scope:    QueryScope
+  headerId:     string
+  lineId:       string
+  strategy?:    'fifo' | 'manual'
+  allocations?: Array<{ inventoryId: string; allocatedQty: number }>
+  scope:        QueryScope
 }): Promise<{ error: string | null }> {
-  const { headerId, lineId, scope } = params
+  const { headerId, lineId, strategy = 'fifo', allocations = [], scope } = params
+
+  const rpcAllocations = allocations.map((a) => ({
+    inventoryId:  a.inventoryId,
+    allocatedQty: a.allocatedQty,
+  }))
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('rpc_reallocate_shipping_line', {
@@ -746,6 +760,8 @@ export async function reallocateShippingLine(params: {
     p_tenant_id:    scope.tenantId,
     p_warehouse_id: scope.warehouseId,
     p_line_id:      lineId,
+    p_strategy:     strategy,
+    p_allocations:  rpcAllocations,
   })
 
   if (error) return { error: (error as { message: string }).message }

@@ -13,6 +13,9 @@ import {
   AlertCircle,
   Trash2,
   RefreshCw,
+  Zap,
+  Hand,
+  X,
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
@@ -29,8 +32,11 @@ import {
   type ShippingOrderSummary,
   type ShippingLineItem,
   type ShippingLineAllocation,
+  type AllocationItem,
+  type InventoryLine,
   fetchShippingOrders,
   fetchShippingOrderLines,
+  fetchInventoryForManualAllocation,
   startPickingShipping,
   completeShippingInspection,
   confirmShippingOrder,
@@ -39,6 +45,7 @@ import {
   isReallocationAllowed,
 } from '@/lib/supabase/queries/shippings'
 import type { QueryScope } from '@/lib/types'
+import { INVENTORY_STATUS_CONFIG } from '@/lib/types'
 import { useTenant } from '@/store/TenantContext'
 import ScopeRequired from '@/components/ui/ScopeRequired'
 
@@ -69,6 +76,184 @@ function ShippingStatusBadge({ status }: { status: ShippingStatus }) {
 }
 
 // =============================================================
+// 手動再引当モーダル
+// =============================================================
+
+function ReallocManualModal({
+  item,
+  inventoryLines,
+  onConfirm,
+  onClose,
+}: {
+  item:           ShippingLineItem
+  inventoryLines: InventoryLine[]
+  onConfirm:      (allocations: AllocationItem[]) => void
+  onClose:        () => void
+}) {
+  const [qtys, setQtys] = useState<Record<string, string>>(() => {
+    // 現在の引当を初期値として設定（再引当なので既存引当をプリセット）
+    const m: Record<string, string> = {}
+    item.allocations.forEach((a) => { m[a.inventoryId] = String(a.allocatedQty) })
+    return m
+  })
+
+  const parseQty = (id: string) => {
+    const v = Number(qtys[id] ?? 0)
+    return isNaN(v) ? 0 : Math.max(0, v)
+  }
+
+  const isRowOverflow = (line: InventoryLine) => parseQty(line.inventoryId) > line.availableQty
+  const hasRowOverflow = inventoryLines.some(isRowOverflow)
+  const totalAllocated = inventoryLines.reduce((s, l) => s + parseQty(l.inventoryId), 0)
+  const isTotalOver    = totalAllocated > item.orderedQuantity
+  const canConfirm     = totalAllocated > 0 && !isTotalOver && !hasRowOverflow
+
+  const handleConfirm = () => {
+    const result: AllocationItem[] = inventoryLines
+      .filter((l) => parseQty(l.inventoryId) > 0)
+      .map((l) => ({
+        inventoryId:  l.inventoryId,
+        locationId:   l.locationId,
+        locationCode: l.locationCode,
+        locationName: l.locationName,
+        status:       l.status,
+        availableQty: l.availableQty,
+        allocatedQty: Math.min(parseQty(l.inventoryId), l.availableQty),
+        receivedDate: l.receivedDate,
+      }))
+    onConfirm(result)
+  }
+
+  const formatDate = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
+        {/* ヘッダー */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">手動再引当</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {item.productName}　出庫数量: <span className="font-semibold text-slate-700">{item.orderedQuantity}</span>
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* 在庫テーブル */}
+        <div className="overflow-auto flex-1">
+          {inventoryLines.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-10">引当可能な在庫がありません</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                <tr>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-500 min-w-[100px]">保管場所</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-500">ステータス</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-slate-500">総数</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-amber-600">引当済</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-teal-600">引当可能</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-500">入庫日</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-slate-500 w-28">引当数</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {inventoryLines.map((line) => {
+                  const cfg      = INVENTORY_STATUS_CONFIG[line.status]
+                  const overflow = isRowOverflow(line)
+                  return (
+                    <tr key={line.inventoryId}
+                      className={`transition-colors ${overflow ? 'bg-red-50' : 'hover:bg-slate-50/60'}`}
+                    >
+                      <td className="px-3 py-2.5">
+                        <span className="font-mono font-medium text-slate-800">{line.locationCode}</span>
+                        {line.locationName && (
+                          <span className="text-slate-400 ml-1.5 text-[10px]">{line.locationName}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${cfg.badgeClass}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotClass}`} />
+                          {cfg.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-600">{line.onHandQty}</td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                        <span className={line.allocatedQty > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'}>
+                          {line.allocatedQty}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                        <span className="text-teal-600 font-semibold">{line.availableQty}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{formatDate(line.receivedDate)}</td>
+                      <td className="px-3 py-2.5">
+                        <div>
+                          <input
+                            type="number" min="0" max={line.availableQty}
+                            value={qtys[line.inventoryId] ?? ''}
+                            onChange={(e) => setQtys((prev) => ({ ...prev, [line.inventoryId]: e.target.value }))}
+                            placeholder="0"
+                            className={`w-full border rounded px-2 py-1 text-right font-mono focus:outline-none focus:ring-2 ${
+                              overflow
+                                ? 'border-red-400 bg-red-50 focus:ring-red-300 text-red-700'
+                                : 'border-slate-300 focus:ring-brand-teal'
+                            }`}
+                          />
+                          {overflow && (
+                            <p className="text-[10px] text-red-500 mt-0.5 text-right">max {line.availableQty}</p>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* フッター */}
+        <div className="px-5 py-3.5 border-t border-slate-200 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 text-xs text-slate-600">
+            <span>
+              引当合計:&nbsp;
+              <span className={`font-semibold tabular-nums ${isTotalOver ? 'text-red-600' : 'text-slate-800'}`}>
+                {totalAllocated}
+              </span>
+              <span className="text-slate-400"> / {item.orderedQuantity}</span>
+            </span>
+            {isTotalOver && (
+              <span className="flex items-center gap-0.5 text-red-600">
+                <AlertCircle size={11} /> 出庫数量を超えています
+              </span>
+            )}
+            {hasRowOverflow && !isTotalOver && (
+              <span className="flex items-center gap-0.5 text-red-600">
+                <AlertCircle size={11} /> 引当可能数を超えている行があります
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
+            <button onClick={onClose}
+              className="px-3 py-1.5 text-xs border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 transition-colors">
+              キャンセル
+            </button>
+            <button onClick={handleConfirm} disabled={!canConfirm}
+              className="px-3 py-1.5 text-xs bg-brand-navy text-white rounded-md hover:bg-brand-navy-mid disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium">
+              この内容で再引当
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// =============================================================
 // ① ピッキングモーダル（pending → picking）
 // =============================================================
 
@@ -90,11 +275,20 @@ function PickingModal({
   const [done,    setDone]    = useState(false)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
-  const [deallocatingId,  setDeallocatingId]  = useState<string | null>(null)
-  const [reallocatingLineId, setReallocatingLineId] = useState<string | null>(null)
+  const [deallocatingId,       setDeallocatingId]       = useState<string | null>(null)
+  const [reallocatingLineId,   setReallocatingLineId]   = useState<string | null>(null)
+  // モード選択ピッカー（クリックで [Zap][Hand][✕] をインライン表示するための lineId）
+  const [reallocModeLineId,    setReallocModeLineId]    = useState<string | null>(null)
+  // 手動再引当モーダル
+  const [manualModalItem,      setManualModalItem]      = useState<ShippingLineItem | null>(null)
+  const [manualInventoryLines, setManualInventoryLines] = useState<InventoryLine[]>([])
+  const [manualInventoryLoading, setManualInventoryLoading] = useState(false)
 
   // pending のときのみ再引当ボタンを表示する
   const canReallocate = isReallocationAllowed(order.status)
+
+  // 操作中かどうか（二重クリック防止用）
+  const isBusy = deallocatingId !== null || reallocatingLineId !== null || manualInventoryLoading
 
   // 引当行を棚番順に1行ずつ展開（ピッキングルート順）
   // allocations が存在しない item はピッキング対象外のため行を生成しない。
@@ -144,13 +338,50 @@ function PickingModal({
     await onItemsReloaded(order.id)
   }
 
-  // 明細単位の再引当（FIFO）。pending のときのみ呼び出し可。
-  const handleReallocLine = async (lineId: string) => {
+  // 再引当ボタンクリック → モード選択ピッカーを開く / 閉じる
+  const handleReallocClick = (lineId: string) => {
+    setError('')
+    setReallocModeLineId((prev) => (prev === lineId ? null : lineId))
+  }
+
+  // FIFO 再引当
+  const handleReallocFifo = async (lineId: string) => {
+    setReallocModeLineId(null)
+    setReallocatingLineId(lineId)
+    setError('')
+    const { error: err } = await reallocateShippingLine({ headerId: order.id, lineId, strategy: 'fifo', scope })
+    setReallocatingLineId(null)
+    if (err) { setError(err); return }
+    await onItemsReloaded(order.id)
+  }
+
+  // 手動再引当: 在庫取得 → モーダルを開く
+  const handleReallocManualOpen = async (lineId: string) => {
+    const item = order.items.find((i) => i.id === lineId)
+    if (!item) return
+    setReallocModeLineId(null)
+    setError('')
+    setManualInventoryLoading(true)
+    const { data, error: fetchErr } = await fetchInventoryForManualAllocation(item.productId, scope)
+    setManualInventoryLoading(false)
+    if (fetchErr) { setError(fetchErr); return }
+    setManualInventoryLines(data)
+    setManualModalItem(item)
+  }
+
+  // 手動再引当: モーダル確定 → RPC 実行
+  const handleReallocManualConfirm = async (allocations: AllocationItem[]) => {
+    if (!manualModalItem) return
+    const lineId = manualModalItem.id
+    setManualModalItem(null)
+    setManualInventoryLines([])
     setReallocatingLineId(lineId)
     setError('')
     const { error: err } = await reallocateShippingLine({
       headerId: order.id,
       lineId,
+      strategy: 'manual',
+      allocations: allocations.map((a) => ({ inventoryId: a.inventoryId, allocatedQty: a.allocatedQty })),
       scope,
     })
     setReallocatingLineId(null)
@@ -184,6 +415,7 @@ function PickingModal({
   }
 
   return (
+    <>
     <Modal title={`${t('pickingListTitle')} - ${order.code}`} onClose={onClose} size="lg">
       <div className="space-y-5">
         <div className="bg-slate-50 rounded-lg px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
@@ -261,17 +493,45 @@ function PickingModal({
                           {/* 再引当ボタンは同一 lineId の最初の行にのみ表示（1クリックで line 全体を再引当） */}
                           {pickingRows.findIndex((r) => r.lineId === row.lineId) ===
                             pickingRows.indexOf(row) && (
-                            <button
-                              onClick={() => handleReallocLine(row.lineId)}
-                              disabled={deallocatingId !== null || reallocatingLineId !== null}
-                              title="FIFO 再引当"
-                              className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
-                            >
-                              {reallocatingLineId === row.lineId
-                                ? <Loader2 size={13} className="animate-spin" />
-                                : <RefreshCw size={13} />
-                              }
-                            </button>
+                            reallocatingLineId === row.lineId ? (
+                              <Loader2 size={13} className="animate-spin text-blue-500" />
+                            ) : reallocModeLineId === row.lineId ? (
+                              // モード選択ピッカー: [Zap FIFO][Hand 手動][✕]
+                              <span className="inline-flex items-center gap-1">
+                                <button
+                                  onClick={() => handleReallocFifo(row.lineId)}
+                                  disabled={isBusy}
+                                  title="FIFO 再引当"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 disabled:opacity-40 transition-colors"
+                                >
+                                  <Zap size={10} /> FIFO
+                                </button>
+                                <button
+                                  onClick={() => handleReallocManualOpen(row.lineId)}
+                                  disabled={isBusy}
+                                  title="手動再引当"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded hover:bg-slate-100 disabled:opacity-40 transition-colors"
+                                >
+                                  <Hand size={10} /> 手動
+                                </button>
+                                <button
+                                  onClick={() => setReallocModeLineId(null)}
+                                  title="キャンセル"
+                                  className="p-0.5 text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleReallocClick(row.lineId)}
+                                disabled={isBusy}
+                                title="再引当"
+                                className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
+                              >
+                                <RefreshCw size={13} />
+                              </button>
+                            )
                           )}
                         </td>
                       )}
@@ -308,17 +568,45 @@ function PickingModal({
                             <span className="text-slate-400 font-normal ml-1">{item.unit}</span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <button
-                              onClick={() => handleReallocLine(item.id)}
-                              disabled={deallocatingId !== null || reallocatingLineId !== null}
-                              title="FIFO 再引当"
-                              className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
-                            >
-                              {reallocatingLineId === item.id
-                                ? <Loader2 size={13} className="animate-spin" />
-                                : <RefreshCw size={13} />
-                              }
-                            </button>
+                            {reallocatingLineId === item.id ? (
+                              <Loader2 size={13} className="animate-spin text-blue-500" />
+                            ) : reallocModeLineId === item.id ? (
+                              // モード選択ピッカー: [Zap FIFO][Hand 手動][✕]
+                              <span className="inline-flex items-center gap-1">
+                                <button
+                                  onClick={() => handleReallocFifo(item.id)}
+                                  disabled={isBusy}
+                                  title="FIFO 再引当"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 disabled:opacity-40 transition-colors"
+                                >
+                                  <Zap size={10} /> FIFO
+                                </button>
+                                <button
+                                  onClick={() => handleReallocManualOpen(item.id)}
+                                  disabled={isBusy}
+                                  title="手動再引当"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded hover:bg-slate-100 disabled:opacity-40 transition-colors"
+                                >
+                                  <Hand size={10} /> 手動
+                                </button>
+                                <button
+                                  onClick={() => setReallocModeLineId(null)}
+                                  title="キャンセル"
+                                  className="p-0.5 text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleReallocClick(item.id)}
+                                disabled={isBusy}
+                                title="再引当"
+                                className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
+                              >
+                                <RefreshCw size={13} />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -349,6 +637,17 @@ function PickingModal({
         </div>
       </div>
     </Modal>
+
+    {/* 手動再引当モーダル（PickingModal の上に重ねて表示） */}
+    {manualModalItem && (
+      <ReallocManualModal
+        item={manualModalItem}
+        inventoryLines={manualInventoryLines}
+        onConfirm={handleReallocManualConfirm}
+        onClose={() => { setManualModalItem(null); setManualInventoryLines([]) }}
+      />
+    )}
+  </>
   )
 }
 
