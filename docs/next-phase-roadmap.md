@@ -9,8 +9,9 @@
 - 在庫の参照・フィルタ・ページネーション
 - 出庫指示の登録・FIFO/手動引当（`rpc_allocate_shipping_inventory`）
 - 引当解除（`rpc_deallocate_shipping_inventory`）✅ 2026-04-13 完了
+- 再引当 FIFO（`rpc_reallocate_shipping_line`）✅ 2026-04-14 完了
 - 出荷確定（`rpc_confirm_shipping_order`）
-- inventory_transactions への全操作記録（allocation / deallocation / shipping）
+- inventory_transactions への全操作記録（allocation / deallocation / reallocation / shipping）
 - ロット・賞味期限管理の基本設計
 - マルチテナント（テナント + 倉庫スコープ）
 
@@ -38,6 +39,18 @@
 - inventory_transactions に `deallocation` タイプで記録
 - UI: PickingModal（pending）・InspectionModal（picking）に `Trash2` ボタン追加
 - 純粋関数 `isDeallocationAllowed(status)` をテスト可能な形で実装
+
+### 3-F: 再引当 RPC（FIFO）✅ 完了（2026-04-14）
+
+`rpc_reallocate_shipping_line` 実装済み。
+
+- `pending` のみ再引当可（picking 以降は不可。サーバー側で強制チェック）
+- 既存引当の全解除 → FIFO 新規引当を**単一トランザクション**で原子実行
+- 在庫不足時は全体 ROLLBACK（旧引当が復元される）
+- inventory_transactions に `deallocation` + `allocation`（`strategy:reallocate-fifo`）で記録
+- UI: PickingModal（pending）に `RefreshCw` 再引当ボタン追加
+- 純粋関数 `isReallocationAllowed(status)` + `REALLOC_ELIGIBLE_STATUSES` 追加
+- 設計ドキュメント: `docs/reallocation-design.md`
 
 ### 3-C: 出荷確定 RPC ✅ 完了
 
@@ -127,9 +140,11 @@ DataTable 統一化のタイミングで TanStack Table の導入を再評価す
 | 3-C | 出荷確定 RPC | ~~最高~~ | ✅ 完了 |
 | 3-D | inventory_transactions | ~~高~~ | ✅ 完了 |
 | 3-E | 移動・調整・変更 RPC 強化 | 中 | 部分実装 |
+| 3-F | 再引当 RPC（FIFO） | ~~高~~ | ✅ 完了（2026-04-14） |
 | 4-A | FEFO 引当 | 中 | 未実装 |
 | 4-B | 賞味期限アラート | 中 | 未実装 |
 | 4-C | 期限切れ自動変更 | 低 | 未実装 |
+| 4-D | 手動再引当（在庫指定） | 中 | 未実装 |
 | 5-A | DataTable 統一 | 低 | 未実装 |
 | 5-B | TanStack Table | 低 | 未実装 |
 
@@ -141,7 +156,7 @@ DataTable 統一化のタイミングで TanStack Table の導入を再評価す
 |---|---|---|
 | Supabase Auth がダミー認証 | セキュリティ | 本番前に必ず RLS + 正規認証に切り替え |
 | `allocated_qty` CHECK 制約が NOT VALID | データ整合性 | 既存データ検証後 `VALIDATE CONSTRAINT` |
-| 引当解除後の再引当が非原子（解除→再登録の2ステップ） | UX / データ整合性 | Phase 4 で引当追加 RPC（差し替え原子化）を実装 |
+| 手動再引当（在庫指定）が未実装（現状は FIFO のみ） | UX | 4-D で手動再引当 RPC を実装 |
 | 移動・調整 RPC の inventory_transactions 記録が不完全 | 監査ログ | 3-E 対応 |
 | モバイル対応が部分的（shipping 未対応） | UX | フェーズ4 完了後に対応 |
 

@@ -6,9 +6,11 @@ export type { InventoryLine, AllocationItem } from './allocation'
 export {
   FIFO_ELIGIBLE_STATUSES,
   DEALLOC_ELIGIBLE_STATUSES,
+  REALLOC_ELIGIBLE_STATUSES,
   computeFifoAllocation,
   validateManualAllocations,
   isDeallocationAllowed,
+  isReallocationAllowed,
 } from './allocation'
 import type { InventoryLine, AllocationItem } from './allocation'
 import { FIFO_ELIGIBLE_STATUSES } from './allocation'
@@ -716,3 +718,39 @@ export async function deallocateShippingInventory(params: {
   type RpcResult = { error: string | null }
   return { error: (data as RpcResult)?.error ?? null }
 }
+
+// =============================================================
+// 再引当（FIFO）
+// =============================================================
+
+/**
+ * 再引当処理（FIFO）。pending ステータスのヘッダーのみ実行可（RPC 側でチェック）。
+ * 対象 line の既存引当を全解除し、FIFO で新規引当を行う。
+ * 解除→引当は単一トランザクションで原子的に実行される。
+ * 在庫不足時は全体ロールバック（旧引当も復元される）。
+ *
+ * @param headerId shipping_headers.id（ステータス検証に使用）
+ * @param lineId   shipping_lines.id（再引当対象の明細行）
+ * @param scope    tenant_id / warehouse_id（スコープ検証に使用）
+ */
+export async function reallocateShippingLine(params: {
+  headerId: string
+  lineId:   string
+  scope:    QueryScope
+}): Promise<{ error: string | null }> {
+  const { headerId, lineId, scope } = params
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('rpc_reallocate_shipping_line', {
+    p_header_id:    headerId,
+    p_tenant_id:    scope.tenantId,
+    p_warehouse_id: scope.warehouseId,
+    p_line_id:      lineId,
+  })
+
+  if (error) return { error: (error as { message: string }).message }
+
+  type RpcResult = { error: string | null }
+  return { error: (data as RpcResult)?.error ?? null }
+}
+

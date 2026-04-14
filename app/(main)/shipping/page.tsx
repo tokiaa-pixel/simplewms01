@@ -12,6 +12,7 @@ import {
   Loader2,
   AlertCircle,
   Trash2,
+  RefreshCw,
 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import SearchInput from '@/components/ui/SearchInput'
@@ -34,6 +35,8 @@ import {
   completeShippingInspection,
   confirmShippingOrder,
   deallocateShippingInventory,
+  reallocateShippingLine,
+  isReallocationAllowed,
 } from '@/lib/supabase/queries/shippings'
 import type { QueryScope } from '@/lib/types'
 import { useTenant } from '@/store/TenantContext'
@@ -87,7 +90,11 @@ function PickingModal({
   const [done,    setDone]    = useState(false)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
-  const [deallocatingId, setDeallocatingId] = useState<string | null>(null)
+  const [deallocatingId,  setDeallocatingId]  = useState<string | null>(null)
+  const [reallocatingLineId, setReallocatingLineId] = useState<string | null>(null)
+
+  // pending のときのみ再引当ボタンを表示する
+  const canReallocate = isReallocationAllowed(order.status)
 
   // 引当行を棚番順に1行ずつ展開（ピッキングルート順）
   // allocations が存在しない item はピッキング対象外のため行を生成しない。
@@ -133,6 +140,20 @@ function PickingModal({
       scope,
     })
     setDeallocatingId(null)
+    if (err) { setError(err); return }
+    await onItemsReloaded(order.id)
+  }
+
+  // 明細単位の再引当（FIFO）。pending のときのみ呼び出し可。
+  const handleReallocLine = async (lineId: string) => {
+    setReallocatingLineId(lineId)
+    setError('')
+    const { error: err } = await reallocateShippingLine({
+      headerId: order.id,
+      lineId,
+      scope,
+    })
+    setReallocatingLineId(null)
     if (err) { setError(err); return }
     await onItemsReloaded(order.id)
   }
@@ -200,6 +221,9 @@ function PickingModal({
                     <th className="px-4 py-2.5 text-right font-medium text-slate-500">{t('tblQtyOrdered')}</th>
                     <th className="px-4 py-2.5 text-center font-medium text-slate-500">{t('tblDone')}</th>
                     <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
+                    {canReallocate && (
+                      <th className="px-4 py-2.5 text-center font-medium text-slate-500"></th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -222,7 +246,7 @@ function PickingModal({
                       <td className="px-4 py-3 text-center">
                         <button
                           onClick={() => handleDealloc(row)}
-                          disabled={deallocatingId !== null}
+                          disabled={deallocatingId !== null || reallocatingLineId !== null}
                           title="引当解除"
                           className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-40 transition-colors"
                         >
@@ -232,6 +256,25 @@ function PickingModal({
                           }
                         </button>
                       </td>
+                      {canReallocate && (
+                        <td className="px-4 py-3 text-center">
+                          {/* 再引当ボタンは同一 lineId の最初の行にのみ表示（1クリックで line 全体を再引当） */}
+                          {pickingRows.findIndex((r) => r.lineId === row.lineId) ===
+                            pickingRows.indexOf(row) && (
+                            <button
+                              onClick={() => handleReallocLine(row.lineId)}
+                              disabled={deallocatingId !== null || reallocatingLineId !== null}
+                              title="FIFO 再引当"
+                              className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-40 transition-colors"
+                            >
+                              {reallocatingLineId === row.lineId
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <RefreshCw size={13} />
+                              }
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

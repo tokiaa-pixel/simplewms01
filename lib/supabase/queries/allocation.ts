@@ -76,6 +76,27 @@ export function isDeallocationAllowed(status: string): boolean {
   return (DEALLOC_ELIGIBLE_STATUSES as string[]).includes(status)
 }
 
+/**
+ * 再引当が許可される出庫指示ステータス。
+ * pending のみ許可。picking 以降は不可（現場作業と乖離するため）。
+ * RPC（rpc_reallocate_shipping_line）でも同じルールをサーバー側で強制する。
+ */
+export const REALLOC_ELIGIBLE_STATUSES: ShippingStatus[] = ['pending']
+
+/**
+ * 再引当が許可されるステータスかどうかを返す（純粋関数・DB アクセスなし）。
+ *
+ * 【使用場所】
+ *   - UI での再引当ボタン表示制御（pending のみ表示）
+ *   最終的なチェックは必ず RPC（サーバー側）で行うこと。
+ *
+ * @param status  shipping_headers.status の値
+ * @returns       true = 再引当可、false = 再引当不可
+ */
+export function isReallocationAllowed(status: string): boolean {
+  return (REALLOC_ELIGIBLE_STATUSES as string[]).includes(status)
+}
+
 // =============================================================
 // 純粋関数: FIFO 引当計算
 // =============================================================

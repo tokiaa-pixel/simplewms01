@@ -732,6 +732,265 @@ COMMENT ON FUNCTION rpc_deallocate_shipping_inventory IS
 
 
 -- =============================================================================
+-- 5. rpc_reallocate_shipping_line
+--    再引当：既存引当を全解除し、FIFO で新規引当を行う。
+--    単一トランザクションで解除→引当を原子的に実行する。
+-- =============================================================================
+-- 【ステータス制御】
+--   pending のみ再引当可（必ずサーバー側でチェック）
+--   picking / inspected / shipped / cancelled → 不可
+--
+-- 【パラメータ】
+--   p_header_id    : shipping_headers.id（ステータス検証）
+--   p_tenant_id    : tenants.id（スコープ検証）
+--   p_warehouse_id : warehouses.id（スコープ検証）
+--   p_line_id      : shipping_lines.id（再引当対象の明細行）
+--
+-- 【処理順序】
+--   Step 1: ヘッダー SELECT FOR UPDATE → status = 'pending' チェック
+--   Step 2: 対象 line SELECT FOR UPDATE → product_id / requested_qty を取得
+--   Step 3: 既存 allocation を解除
+--           - inventory.allocated_qty 減算
+--           - inventory_transactions INSERT (type='deallocation')
+--           - shipping_lines.allocated_qty 減算
+--           - shipping_allocations DELETE
+--   Step 4: FIFO で新規引当
+--           - available 在庫を received_date ASC NULLS LAST 順にスキャン
+--           - inventory.allocated_qty 加算
+--           - inventory_transactions INSERT (type='allocation', note='strategy:reallocate-fifo')
+--           - shipping_allocations INSERT
+--   Step 5: shipping_lines.allocated_qty を新合計で更新
+--
+-- 【在庫不足時の挙動】
+--   FIFO 引当後の合計が requested_qty に満たない場合は EXCEPTION でロールバック。
+--   旧引当も復元される（全体 ROLLBACK）。エラーメッセージに不足数を含む。
+--
+-- 【inventory_transactions 記録】
+--   旧引当ごとに type='deallocation' (qty=0, qty_delta=0)
+--   新引当ごとに type='allocation'   (qty=0, qty_delta=0, note='strategy:reallocate-fifo')
+
+DROP FUNCTION IF EXISTS rpc_reallocate_shipping_line(uuid,uuid,uuid,uuid);
+
+CREATE OR REPLACE FUNCTION rpc_reallocate_shipping_line(
+  p_header_id    uuid,
+  p_tenant_id    uuid,
+  p_warehouse_id uuid,
+  p_line_id      uuid
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_status          text;
+  v_product_id      uuid;
+  v_requested_qty   integer;
+  v_alloc           record;
+  v_inv             record;
+  v_qty             integer;
+  v_fifo_inv        record;
+  v_remaining       integer;
+  v_avail           integer;
+  v_add_qty         integer;
+  v_line_alloc_total integer;
+BEGIN
+  -- ── Step 1: ヘッダーの存在・スコープ・ステータスチェック ─────
+  -- FOR UPDATE でロック取得し、並行するステータス変更と競合を防ぐ
+  SELECT status
+  INTO   v_status
+  FROM   shipping_headers
+  WHERE  id           = p_header_id
+    AND  tenant_id    = p_tenant_id
+    AND  warehouse_id = p_warehouse_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN json_build_object(
+      'error',
+      '出庫指示が見つかりません。スコープ違反の可能性があります。'
+    );
+  END IF;
+
+  -- 再引当は pending のみ許可
+  IF v_status != 'pending' THEN
+    RETURN json_build_object(
+      'error',
+      '再引当不可のステータスです: ' || v_status || '（未処理のみ再引当できます）'
+    );
+  END IF;
+
+  -- ── Step 2: 対象明細行を SELECT FOR UPDATE ────────────────────
+  SELECT product_id, requested_qty
+  INTO   v_product_id, v_requested_qty
+  FROM   shipping_lines
+  WHERE  id           = p_line_id
+    AND  header_id    = p_header_id
+    AND  tenant_id    = p_tenant_id
+    AND  warehouse_id = p_warehouse_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN json_build_object(
+      'error',
+      '対象の明細行が見つかりません（line_id: ' || p_line_id || '）'
+    );
+  END IF;
+
+  -- ── Step 3: 既存引当を全解除 ──────────────────────────────────
+  -- ORDER BY id ASC でロック順を固定し deadlock を防ぐ
+  FOR v_alloc IN
+    SELECT id, inventory_id, allocated_qty
+    FROM   shipping_allocations
+    WHERE  line_id = p_line_id
+    ORDER BY id ASC
+  LOOP
+    v_qty := v_alloc.allocated_qty;
+
+    -- 在庫行を FOR UPDATE でロック取得
+    SELECT id, tenant_id, warehouse_id, product_id,
+           on_hand_qty, allocated_qty,
+           received_date, lot_no, expiry_date
+    INTO   v_inv
+    FROM   inventory
+    WHERE  id = v_alloc.inventory_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '在庫行が見つかりません（inventory_id: %）', v_alloc.inventory_id;
+    END IF;
+
+    -- テナント/倉庫境界チェック
+    IF v_inv.tenant_id != p_tenant_id OR v_inv.warehouse_id != p_warehouse_id THEN
+      RAISE EXCEPTION 'テナントまたは倉庫の境界違反（inventory_id: %）', v_inv.id;
+    END IF;
+
+    -- allocated_qty がマイナスにならないことを確認
+    IF v_inv.allocated_qty < v_qty THEN
+      RAISE EXCEPTION '在庫整合エラー: allocated_qty が不足しています（inventory_id: %, allocated: %, dealloc: %）',
+        v_inv.id, v_inv.allocated_qty, v_qty;
+    END IF;
+
+    -- ① inventory.allocated_qty を減算
+    UPDATE inventory
+    SET    allocated_qty = v_inv.allocated_qty - v_qty
+    WHERE  id = v_inv.id;
+
+    -- ② inventory_transactions に解除イベントを記録
+    INSERT INTO inventory_transactions (
+      tenant_id,    warehouse_id,    inventory_id,   product_id,
+      transaction_type,
+      qty,          qty_delta,
+      before_on_hand_qty,   after_on_hand_qty,
+      before_allocated_qty, after_allocated_qty,
+      received_date,        lot_no,                 expiry_date,
+      reference_type,       reference_id,
+      note
+    ) VALUES (
+      p_tenant_id,   p_warehouse_id,  v_inv.id,       v_inv.product_id,
+      'deallocation',
+      0,             0,
+      v_inv.on_hand_qty,    v_inv.on_hand_qty,
+      v_inv.allocated_qty,  v_inv.allocated_qty - v_qty,
+      v_inv.received_date,  v_inv.lot_no,           v_inv.expiry_date,
+      'shipping_line',      p_line_id,
+      'strategy:reallocate-fifo'
+    );
+
+    -- ③ shipping_lines.allocated_qty を減算（0 未満にならないようガード）
+    UPDATE shipping_lines
+    SET    allocated_qty = GREATEST(0, allocated_qty - v_qty)
+    WHERE  id = p_line_id;
+
+    -- ④ shipping_allocations から削除
+    DELETE FROM shipping_allocations WHERE id = v_alloc.id;
+
+  END LOOP;  -- 既存引当の解除
+
+  -- ── Step 4: FIFO で新規引当 ───────────────────────────────────
+  -- available 在庫を received_date ASC NULLS LAST, id ASC 順でスキャン（deadlock 防止）
+  v_remaining        := v_requested_qty;
+  v_line_alloc_total := 0;
+
+  FOR v_fifo_inv IN
+    SELECT id, tenant_id, warehouse_id, product_id,
+           on_hand_qty, allocated_qty, status,
+           received_date, lot_no, expiry_date
+    FROM   inventory
+    WHERE  product_id   = v_product_id
+      AND  tenant_id    = p_tenant_id
+      AND  warehouse_id = p_warehouse_id
+      AND  status       = 'available'
+      AND  on_hand_qty - allocated_qty > 0
+    ORDER BY received_date ASC NULLS LAST, id ASC
+    FOR UPDATE
+  LOOP
+    EXIT WHEN v_remaining <= 0;
+
+    v_avail   := GREATEST(0, v_fifo_inv.on_hand_qty - v_fifo_inv.allocated_qty);
+    v_add_qty := LEAST(v_avail, v_remaining);
+    IF v_add_qty <= 0 THEN CONTINUE; END IF;
+
+    -- ① shipping_allocations を INSERT
+    INSERT INTO shipping_allocations (line_id, inventory_id, allocated_qty)
+    VALUES (p_line_id, v_fifo_inv.id, v_add_qty);
+
+    -- ② inventory.allocated_qty を加算
+    UPDATE inventory
+    SET    allocated_qty = v_fifo_inv.allocated_qty + v_add_qty
+    WHERE  id = v_fifo_inv.id;
+
+    -- ③ inventory_transactions に引当イベントを記録
+    INSERT INTO inventory_transactions (
+      tenant_id,    warehouse_id,    inventory_id,     product_id,
+      transaction_type,
+      qty,          qty_delta,
+      before_on_hand_qty,   after_on_hand_qty,
+      before_allocated_qty, after_allocated_qty,
+      received_date,        lot_no,                   expiry_date,
+      reference_type,       reference_id,
+      note
+    ) VALUES (
+      p_tenant_id,   p_warehouse_id,  v_fifo_inv.id,    v_fifo_inv.product_id,
+      'allocation',
+      0,             0,
+      v_fifo_inv.on_hand_qty,    v_fifo_inv.on_hand_qty,
+      v_fifo_inv.allocated_qty,  v_fifo_inv.allocated_qty + v_add_qty,
+      v_fifo_inv.received_date,  v_fifo_inv.lot_no,        v_fifo_inv.expiry_date,
+      'shipping_line',           p_line_id,
+      'strategy:reallocate-fifo'
+    );
+
+    v_remaining        := v_remaining - v_add_qty;
+    v_line_alloc_total := v_line_alloc_total + v_add_qty;
+  END LOOP;  -- FIFO 在庫スキャン
+
+  -- ── 在庫不足チェック ──────────────────────────────────────────
+  -- 部分引当は許容しない。不足の場合は全体ロールバックで旧引当を復元する。
+  IF v_remaining > 0 THEN
+    RAISE EXCEPTION '在庫不足のため再引当できません（不足数: %、商品ID: %）',
+      v_remaining, v_product_id;
+  END IF;
+
+  -- ── Step 5: shipping_lines.allocated_qty を新合計で更新 ────────
+  UPDATE shipping_lines
+  SET    allocated_qty = v_line_alloc_total
+  WHERE  id = p_line_id;
+
+  RETURN json_build_object('error', NULL::text);
+
+EXCEPTION WHEN others THEN
+  RETURN json_build_object('error', SQLERRM);
+END;
+$$;
+
+COMMENT ON FUNCTION rpc_reallocate_shipping_line IS
+  '再引当（FIFO）。pending ステータスのみ実行可（サーバー側で強制チェック）。'
+  '既存 allocation を全解除後、FIFO で新規引当を単一トランザクションで実行。'
+  '在庫不足時は EXCEPTION で全体ロールバック（旧引当も復元される）。'
+  'inventory_transactions に deallocation + allocation を記録（note=strategy:reallocate-fifo）。';
+
+
+-- =============================================================================
 -- 既存 RPC 関数の補完（未作成の場合に備えて定義）
 -- =============================================================================
 -- rpc_move_inventory / rpc_adjust_inventory / rpc_change_inventory_status は
