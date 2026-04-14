@@ -406,7 +406,7 @@ export async function updateArrival(params: {
     p_arrival_date:        arrivalDate,
     p_memo:                memo ?? null,
     p_expected_updated_at: expectedUpdatedAt,
-    p_lines:               JSON.stringify(linesJson),
+    p_lines:               linesJson,
   })
 
   if (error) return { error: (error as { message: string }).message }

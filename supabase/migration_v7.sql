@@ -71,7 +71,14 @@ BEGIN
     );
   END IF;
 
-  -- ── Step 4: 入庫済み明細の存在チェック ────────────────────────
+  -- ── Step 4: p_lines が JSON 配列であることを確認 ──────────────
+  IF json_typeof(p_lines) IS DISTINCT FROM 'array' THEN
+    RETURN json_build_object(
+      'error', 'p_lines は JSON 配列である必要があります（受け取った型: ' || COALESCE(json_typeof(p_lines), 'null') || '）'
+    );
+  END IF;
+
+  -- ── Step 5: 入庫済み明細の存在チェック ────────────────────────
   IF EXISTS (
     SELECT 1
     FROM   arrival_lines
@@ -83,7 +90,7 @@ BEGIN
     );
   END IF;
 
-  -- ── Step 5: 既存明細を全削除 ──────────────────────────────────
+  -- ── Step 6: 既存明細を全削除 ──────────────────────────────────
   -- (header_id, line_no) UNIQUE 制約の衝突を避けるため
   -- UPDATE ではなく DELETE + INSERT で再構築する。
   DELETE FROM arrival_lines
@@ -91,7 +98,7 @@ BEGIN
     AND  tenant_id    = p_tenant_id
     AND  warehouse_id = p_warehouse_id;
 
-  -- ── Step 6: 明細を INSERT ─────────────────────────────────────
+  -- ── Step 7: 明細を INSERT ─────────────────────────────────────
   FOR v_line IN
     SELECT value FROM json_array_elements(p_lines)
   LOOP
